@@ -1,0 +1,100 @@
+{'exp_name': 'ca_point', 'model': 'RIENET', 'dataset': 'ca_point', 'model_path': '', 'dim': 8, 'nn_margin': 0.6, 'loss_margin': 0.01, 'list_k1': [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9], 'list_k2': [9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9], 'emb_dims': 6, 'n_iters': 3, 'n_points': 40, 'n_subsampled_points': 768, 'batch_size': 1, 'test_batch_size': 1, 'epochs': 200, 'use_sgd': False, 'n_keypoints': 500, 'lr': 0.001, 'momentum': 0.9, 'no_cuda': False, 'seed': 1234, 'start_epoch': 0, 'lr_step': [40, 80, 120, 160, 700, 900], 'resume': False, 'eval': False}
+==TRAIN==
+A--------->B
+EPOCH:: 0, Loss: 9938602.862048, rot_MSE: 8850.218750, rot_RMSE: 94.075600, rot_MAE: 74.647980, trans_MSE: 43822.085938, trans_RMSE: 209.337250, trans_MAE: 153.611252
+==TEST==
+A--------->B
+EPOCH:: 0, Loss: 9923332.131024, rot_MSE: 8660.618164, rot_RMSE: 93.062439, rot_MAE: 73.496239, trans_MSE: 42061.750000, trans_RMSE: 205.089615, trans_MAE: 149.938385 , deg_mean: 108.975548, deg_rmse: 117.865105, trans_mean: 303.636200, trans_rmse: 355.225647: 
+A--------->B
+EPOCH:: 0, Loss: 9923332.131024, rot_MSE: 8660.618164, rot_RMSE: 93.062439, rot_MAE: 73.496239, trans_MSE: 42061.750000, trans_RMSE: 205.089615, trans_MAE: 149.938385 , deg_mean: 108.975548, deg_rmse: 117.865105, trans_mean: 303.636200, trans_rmse: 355.225647: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 1, Loss: 9886433.990813, rot_MSE: 8730.671875, rot_RMSE: 93.438065, rot_MAE: 73.712479, trans_MSE: 42344.527344, trans_RMSE: 205.777863, trans_MAE: 150.396774
+==TEST==
+A--------->B
+EPOCH:: 1, Loss: 9886934.787349, rot_MSE: 8725.426758, rot_RMSE: 93.409996, rot_MAE: 73.608902, trans_MSE: 41594.343750, trans_RMSE: 203.946915, trans_MAE: 148.272797 , deg_mean: 108.977463, deg_rmse: 117.798584, trans_mean: 302.009674, trans_rmse: 353.246399: 
+A--------->B
+EPOCH:: 1, Loss: 9886934.787349, rot_MSE: 8725.426758, rot_RMSE: 93.409996, rot_MAE: 73.608902, trans_MSE: 41594.343750, trans_RMSE: 203.946915, trans_MAE: 148.272797 , deg_mean: 108.977463, deg_rmse: 117.798584, trans_mean: 302.009674, trans_rmse: 353.246399: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 2, Loss: 9862998.491416, rot_MSE: 8584.735352, rot_RMSE: 92.653847, rot_MAE: 72.745483, trans_MSE: 41725.648438, trans_RMSE: 204.268570, trans_MAE: 147.526627
+==TEST==
+A--------->B
+EPOCH:: 2, Loss: 9859775.429066, rot_MSE: 8745.359375, rot_RMSE: 93.516624, rot_MAE: 72.386696, trans_MSE: 39933.777344, trans_RMSE: 199.834381, trans_MAE: 144.132080 , deg_mean: 105.953072, deg_rmse: 115.421776, trans_mean: 293.727661, trans_rmse: 346.123260: 
+A--------->B
+EPOCH:: 2, Loss: 9859775.429066, rot_MSE: 8745.359375, rot_RMSE: 93.516624, rot_MAE: 72.386696, trans_MSE: 39933.777344, trans_RMSE: 199.834381, trans_MAE: 144.132080 , deg_mean: 105.953072, deg_rmse: 115.421776, trans_mean: 293.727661, trans_rmse: 346.123260: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 3, Loss: 9825798.598946, rot_MSE: 8690.574219, rot_RMSE: 93.223251, rot_MAE: 72.322929, trans_MSE: 40323.031250, trans_RMSE: 200.805954, trans_MAE: 144.895386
+==TEST==
+A--------->B
+EPOCH:: 3, Loss: 9859310.909337, rot_MSE: 8778.883789, rot_RMSE: 93.695702, rot_MAE: 71.942322, trans_MSE: 37960.652344, trans_RMSE: 194.834930, trans_MAE: 140.697769 , deg_mean: 104.013115, deg_rmse: 113.844452, trans_mean: 287.170441, trans_rmse: 337.463989: 
+A--------->B
+EPOCH:: 3, Loss: 9859310.909337, rot_MSE: 8778.883789, rot_RMSE: 93.695702, rot_MAE: 71.942322, trans_MSE: 37960.652344, trans_RMSE: 194.834930, trans_MAE: 140.697769 , deg_mean: 104.013115, deg_rmse: 113.844452, trans_mean: 287.170441, trans_rmse: 337.463989: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 4, Loss: 9811187.534639, rot_MSE: 8805.306641, rot_RMSE: 93.836594, rot_MAE: 72.289078, trans_MSE: 39719.292969, trans_RMSE: 199.296997, trans_MAE: 142.643585
+==TEST==
+A--------->B
+EPOCH:: 4, Loss: 9842734.493373, rot_MSE: 8533.114258, rot_RMSE: 92.374855, rot_MAE: 69.852699, trans_MSE: 37139.449219, trans_RMSE: 192.715988, trans_MAE: 136.756088 , deg_mean: 99.510094, deg_rmse: 110.999863, trans_mean: 278.984375, trans_rmse: 333.793854: 
+A--------->B
+EPOCH:: 4, Loss: 9842734.493373, rot_MSE: 8533.114258, rot_RMSE: 92.374855, rot_MAE: 69.852699, trans_MSE: 37139.449219, trans_RMSE: 192.715988, trans_MAE: 136.756088 , deg_mean: 99.510094, deg_rmse: 110.999863, trans_mean: 278.984375, trans_rmse: 333.793854: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 5, Loss: 9796614.473795, rot_MSE: 8400.773438, rot_RMSE: 91.655731, rot_MAE: 69.733826, trans_MSE: 37995.578125, trans_RMSE: 194.924545, trans_MAE: 137.723099
+==TEST==
+A--------->B
+EPOCH:: 5, Loss: 9843833.811596, rot_MSE: 8493.871094, rot_RMSE: 92.162201, rot_MAE: 69.993340, trans_MSE: 37229.621094, trans_RMSE: 192.949783, trans_MAE: 136.740906 , deg_mean: 99.851570, deg_rmse: 111.068794, trans_mean: 280.609711, trans_rmse: 334.198853: 
+A--------->B
+EPOCH:: 5, Loss: 9842734.493373, rot_MSE: 8533.114258, rot_RMSE: 92.374855, rot_MAE: 69.852699, trans_MSE: 37139.449219, trans_RMSE: 192.715988, trans_MAE: 136.756088 , deg_mean: 99.510094, deg_rmse: 110.999863, trans_mean: 278.984375, trans_rmse: 333.793854: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 6, Loss: 9787772.404970, rot_MSE: 8911.401367, rot_RMSE: 94.400223, rot_MAE: 71.125664, trans_MSE: 38360.140625, trans_RMSE: 195.857452, trans_MAE: 137.998840
+==TEST==
+A--------->B
+EPOCH:: 6, Loss: 9892454.907982, rot_MSE: 9106.364258, rot_RMSE: 95.427269, rot_MAE: 74.022545, trans_MSE: 40685.128906, trans_RMSE: 201.705551, trans_MAE: 146.157562 , deg_mean: 107.270226, deg_rmse: 117.048782, trans_mean: 295.966034, trans_rmse: 349.364258: 
+A--------->B
+EPOCH:: 6, Loss: 9842734.493373, rot_MSE: 8533.114258, rot_RMSE: 92.374855, rot_MAE: 69.852699, trans_MSE: 37139.449219, trans_RMSE: 192.715988, trans_MAE: 136.756088 , deg_mean: 99.510094, deg_rmse: 110.999863, trans_mean: 278.984375, trans_rmse: 333.793854: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 7, Loss: 9790919.491867, rot_MSE: 8781.180664, rot_RMSE: 93.707954, rot_MAE: 71.076180, trans_MSE: 37601.375000, trans_RMSE: 193.910736, trans_MAE: 137.049866
+==TEST==
+A--------->B
+EPOCH:: 7, Loss: 9791855.042620, rot_MSE: 8297.156250, rot_RMSE: 91.088730, rot_MAE: 67.871964, trans_MSE: 35235.195312, trans_RMSE: 187.710403, trans_MAE: 131.681702 , deg_mean: 95.879364, deg_rmse: 108.411499, trans_mean: 269.040741, trans_rmse: 325.123932: 
+A--------->B
+EPOCH:: 7, Loss: 9791855.042620, rot_MSE: 8297.156250, rot_RMSE: 91.088730, rot_MAE: 67.871964, trans_MSE: 35235.195312, trans_RMSE: 187.710403, trans_MAE: 131.681702 , deg_mean: 95.879364, deg_rmse: 108.411499, trans_mean: 269.040741, trans_rmse: 325.123932: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 8, Loss: 9759891.892018, rot_MSE: 8778.014648, rot_RMSE: 93.691063, rot_MAE: 69.452995, trans_MSE: 35986.289062, trans_RMSE: 189.700531, trans_MAE: 131.736725
+==TEST==
+A--------->B
+EPOCH:: 8, Loss: 9790846.386898, rot_MSE: 8680.341797, rot_RMSE: 93.168350, rot_MAE: 67.819191, trans_MSE: 34384.167969, trans_RMSE: 185.429688, trans_MAE: 127.612679 , deg_mean: 92.696068, deg_rmse: 106.370255, trans_mean: 262.297546, trans_rmse: 321.173615: 
+A--------->B
+EPOCH:: 8, Loss: 9790846.386898, rot_MSE: 8680.341797, rot_RMSE: 93.168350, rot_MAE: 67.819191, trans_MSE: 34384.167969, trans_RMSE: 185.429688, trans_MAE: 127.612679 , deg_mean: 92.696068, deg_rmse: 106.370255, trans_mean: 262.297546, trans_rmse: 321.173615: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 9, Loss: 9747187.562199, rot_MSE: 8359.649414, rot_RMSE: 91.431122, rot_MAE: 67.214394, trans_MSE: 34981.750000, trans_RMSE: 187.034088, trans_MAE: 128.083130
+==TEST==
+A--------->B
+EPOCH:: 9, Loss: 9798303.909337, rot_MSE: 8111.159668, rot_RMSE: 90.061974, rot_MAE: 65.459824, trans_MSE: 33095.097656, trans_RMSE: 181.920578, trans_MAE: 124.283134 , deg_mean: 89.903236, deg_rmse: 104.335449, trans_mean: 254.352753, trans_rmse: 315.095673: 
+A--------->B
+EPOCH:: 9, Loss: 9790846.386898, rot_MSE: 8680.341797, rot_RMSE: 93.168350, rot_MAE: 67.819191, trans_MSE: 34384.167969, trans_RMSE: 185.429688, trans_MAE: 127.612679 , deg_mean: 92.696068, deg_rmse: 106.370255, trans_mean: 262.297546, trans_rmse: 321.173615: 
+==best==
+==TRAIN==
+A--------->B
+EPOCH:: 10, Loss: 9736031.108434, rot_MSE: 8573.784180, rot_RMSE: 92.594734, rot_MAE: 67.488892, trans_MSE: 33842.511719, trans_RMSE: 183.963348, trans_MAE: 125.997116
+==TEST==
+A--------->B
+EPOCH:: 10, Loss: 9742376.880422, rot_MSE: 8048.747070, rot_RMSE: 89.714813, rot_MAE: 64.329407, trans_MSE: 31657.271484, trans_RMSE: 177.924911, trans_MAE: 120.863632 , deg_mean: 88.660149, deg_rmse: 103.692352, trans_mean: 248.282837, trans_rmse: 308.174988: 
+A--------->B
+EPOCH:: 10, Loss: 9742376.880422, rot_MSE: 8048.747070, rot_RMSE: 89.714813, rot_MAE: 64.329407, trans_MSE: 31657.271484, trans_RMSE: 177.924911, trans_MAE: 120.863632 , deg_mean: 88.660149, deg_rmse: 103.692352, trans_mean: 248.282837, trans_rmse: 308.174988: 
+==best==
