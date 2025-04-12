@@ -7,7 +7,7 @@ from pointnet2 import pointnet2_utils
 import torch.nn.functional as F
 from torch.autograd import Variable
 from chamfer_loss import *
-
+import scipy.linalg
 _EPS = 1e-5
 def pairwise_distance_batch(x,y):
     """ 
@@ -56,7 +56,7 @@ def get_graph_feature(x, k):
 
     idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1) * num_points
 
-    idx = idx + idx_base
+    idx = idx + idx_base#区分不同批次的索引#例如batch_size =3 [0],[1],[2]*32 第一个0~31 32~63
 
     idx = idx.view(-1)
 
@@ -132,6 +132,8 @@ def get_knn_index(x, k):
     idx = idx.view(-1)
     return idx, idx2
 
+from numpy.linalg import svd
+
 def compute_rigid_transformation(src, src_corr, weight):
     """
         Compute rigid transforms between two point sets
@@ -148,12 +150,15 @@ def compute_rigid_transformation(src, src_corr, weight):
     src_corr2 = (src_corr * weight).sum(dim = 2, keepdim = True)/weight.sum(dim = 2,keepdim = True)
     src_centered = src - src2
     src_corr_centered = src_corr - src_corr2
-    H = torch.matmul(src_centered * weight, src_corr_centered.transpose(2, 1).contiguous())
 
+    H = torch.matmul(src_centered * weight, src_corr_centered.transpose(2, 1).contiguous())
+ 
     R = []
 
     for i in range(src.size(0)):
         u, s, v = torch.svd(H[i])
+        #eye_matrix = torch.eye(H[i].size(0), device=H[i].device)  # 将 eye_matrix 移到与 H[i] 相同的设备
+        #u, s, v = torch.linalg.svd(H[i] + 1e-3 * eye_matrix)
         r = torch.matmul(v, u.transpose(1, 0)).contiguous()
         r_det = torch.det(r).item()
         diag = torch.from_numpy(np.array([[1.0, 0, 0],
@@ -166,6 +171,8 @@ def compute_rigid_transformation(src, src_corr, weight):
 
     t = torch.matmul(-R, src2.mean(dim = 2, keepdim=True)) + src_corr2.mean(dim = 2, keepdim = True)
     return R, t
+
+
 
 def get_keypoints(src, src_corr, weight, num_keypoints):
     """
