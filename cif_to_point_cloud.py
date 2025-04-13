@@ -189,26 +189,75 @@ def visualize_point_clouds(source, target, title="点云可视化"):
     # 默认不显示图像，只保存
     # plt.show()
 
-def main():
-    parser = argparse.ArgumentParser(description='CIF文件转换为点云数据并进行变换')
-    parser.add_argument('cif_path', type=str, help='CIF文件路径')
-    parser.add_argument('--output_pkl', type=str, default='point_cloud_data.pkl', help='输出的PKL文件路径')
-    parser.add_argument('--output_cif', type=str, default='target_structure.cif', help='输出的目标结构CIF文件路径')
-    parser.add_argument('--visualize', action='store_true', help='是否可视化点云')
+def process_batch(batch_dir, output_dir, visualize=False):
+    """批量处理指定目录下所有子文件夹中的xxxx_point.cif文件"""
+    print(f"开始批处理目录: {batch_dir}")
     
-    args = parser.parse_args()
+    # 确保输出目录存在
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"创建输出目录: {output_dir}")
     
-    # 检查文件是否存在
-    if not os.path.exists(args.cif_path):
-        print(f"错误：文件 {args.cif_path} 不存在")
+    # 获取所有子文件夹
+    subdirectories = [os.path.join(batch_dir, d) for d in os.listdir(batch_dir) 
+                     if os.path.isdir(os.path.join(batch_dir, d))]
+    
+    if not subdirectories:
+        print(f"警告: 在{batch_dir}中未找到子文件夹")
         return
+    
+    total_processed = 0
+    
+    # 遍历每个子文件夹
+    for subdir in tqdm(subdirectories, desc="处理子文件夹"):
+        # 在子文件夹中查找符合条件的cif文件 (xxxx_point.cif)
+        cif_files = [f for f in os.listdir(subdir) 
+                    if os.path.isfile(os.path.join(subdir, f)) and f.endswith('_point.cif')]
+        
+        if not cif_files:
+            print(f"在{subdir}中未找到xxxx_point.cif文件，跳过")
+            continue
+            
+        # 对每个找到的文件进行处理
+        for cif_file in cif_files:
+            cif_path = os.path.join(subdir, cif_file)
+            
+            # 创建对应的输出子目录（保持原有目录结构）
+            subdir_name = os.path.basename(subdir)
+            sub_output_dir = os.path.join(output_dir, subdir_name)
+            if not os.path.exists(sub_output_dir):
+                os.makedirs(sub_output_dir)
+            
+            try:
+                # 处理单个cif文件（复用现有函数）
+                process_single_file(cif_path, sub_output_dir, visualize)
+                total_processed += 1
+            except Exception as e:
+                print(f"处理文件{cif_path}时出错: {e}")
+    
+    print(f"批处理完成! 共处理了{total_processed}个文件")
+
+def process_single_file(cif_path, output_dir, visualize=False):
+    """处理单个cif文件"""
+    print(f"处理文件: {cif_path}")
+    
+    # 获取输入cif文件的基本名称（不含路径和扩展名）
+    base_name = os.path.splitext(os.path.basename(cif_path))[0]
+    
+    # 生成输出文件路径
+    output_pkl = os.path.join(output_dir, f"{base_name}.pkl")
+    output_cif = os.path.join(output_dir, f"{base_name}_target.cif")
+    
+    print(f"输入CIF文件: {cif_path}")
+    print(f"输出PKL文件: {output_pkl}")
+    print(f"输出目标CIF文件: {output_cif}")
     
     # 解析CIF文件
     try:
-        point_cloud, atom_types, atom_labels, cif_content, atom_lines = parse_cif(args.cif_path)
+        point_cloud, atom_types, atom_labels, cif_content, atom_lines = parse_cif(cif_path)
     except Exception as e:
         print(f"解析CIF文件时出错：{e}")
-        return
+        raise e
     
     print(f"成功提取点云数据，共 {len(point_cloud)} 个点")
     
@@ -228,17 +277,58 @@ def main():
     grid_info = create_grid_info()
     
     # 创建并保存pkl文件
-    create_pkl_file(point_cloud, target_point_cloud, rotation_matrix, translation_vector, args.output_pkl, grid_info)
+    create_pkl_file(point_cloud, target_point_cloud, rotation_matrix, translation_vector, output_pkl, grid_info)
+    
+    # 将目标点云转置回[N, 3]格式，用于保存为CIF文件
+    target_point_cloud_for_cif = target_point_cloud.T
     
     # 保存目标结构为CIF格式
-    save_as_cif(target_point_cloud.T, atom_types, atom_labels, cif_content, atom_lines, args.output_cif)
+    save_as_cif(target_point_cloud_for_cif, atom_types, atom_labels, cif_content, atom_lines, output_cif)
     
     # 只有当明确指定--visualize参数时才执行可视化
-    if args.visualize:
+    if visualize:
         print("执行点云可视化...")
-        visualize_point_clouds(point_cloud, target_point_cloud.T)
+        visualize_point_clouds(point_cloud, target_point_cloud)
     
-    print("处理完成!")
+    print(f"文件{cif_path}处理完成!")
+
+def main():
+    parser = argparse.ArgumentParser(description='CIF文件转换为点云数据并进行变换')
+    parser.add_argument('cif_path', type=str, nargs='?', help='CIF文件路径')
+    parser.add_argument('--batch_dir', type=str, help='批处理目录路径，指定该参数将进行批处理')
+    parser.add_argument('--output_dir', type=str, default='.', help='输出文件保存目录')
+    parser.add_argument('--visualize', action='store_true', help='是否可视化点云')
+    
+    args = parser.parse_args()
+    
+    # 检查是否进行批处理
+    if args.batch_dir:
+        # 批处理模式
+        if not os.path.exists(args.batch_dir):
+            print(f"错误：批处理目录 {args.batch_dir} 不存在")
+            return
+        
+        process_batch(args.batch_dir, args.output_dir, args.visualize)
+    else:
+        # 单文件处理模式
+        if not args.cif_path:
+            parser.print_help()
+            print("\n错误：请提供CIF文件路径或使用--batch_dir参数指定批处理目录")
+            return
+            
+        if not os.path.exists(args.cif_path):
+            print(f"错误：文件 {args.cif_path} 不存在")
+            return
+        
+        # 确保输出目录存在
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
+            print(f"创建输出目录: {args.output_dir}")
+        
+        # 处理单个文件
+        process_single_file(args.cif_path, args.output_dir, args.visualize)
+        
+        print("处理完成!")
 
 if __name__ == '__main__':
     main()
