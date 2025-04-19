@@ -10,6 +10,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import re
+import glob
 
 def parse_cif(cif_path):
     """解析CIF文件，提取原子坐标和完整CIF内容"""
@@ -76,7 +77,7 @@ def random_translation_vector(scale=0.1):
     """生成随机平移向量"""
     return np.random.uniform(-scale, scale, size=(3,)).astype(np.float32)
 
-def transform_point_cloud_numpy(point_cloud, rotation, translation):
+def transform_point_cloud_numpy(point_cloud, rotation, translation, rotation_only=False):
     """使用numpy将点云进行变换 - 使用右乘方式：点云 = 旋转矩阵 * 点云 + 平移向量"""
     # 确保点云是[3, N]格式
     if point_cloud.shape[1] == 3 and point_cloud.shape[0] != 3:
@@ -86,7 +87,13 @@ def transform_point_cloud_numpy(point_cloud, rotation, translation):
     
     # 现在point_cloud已经是[3, N]格式，可以直接应用旋转和平移
     # R[3,3] * point_cloud[3,N] + t[3,1] = transformed_point_cloud[3,N]
-    transformed_point_cloud = np.matmul(rotation, point_cloud) + translation.reshape(3, 1)
+    if rotation_only:
+        # 只应用旋转，不应用平移
+        transformed_point_cloud = np.matmul(rotation, point_cloud)
+        print("应用旋转变换（无平移）")
+    else:
+        # 应用旋转和平移
+        transformed_point_cloud = np.matmul(rotation, point_cloud) + translation.reshape(3, 1)
     
     return transformed_point_cloud
 
@@ -112,23 +119,28 @@ def create_pkl_file(source_points, target_points, rotation, translation, output_
     print(f"保存前源点云形状: {source_points.shape}")
     print(f"保存前目标点云形状: {target_points.shape}")
     
-    # 确保点云是[3, N]格式
-    if source_points.shape[1] == 3 and source_points.shape[0] != 3:
-        print(f"转置点云: 从{source_points.shape}到", end="")
-        source_points = source_points.T
-        print(f"{source_points.shape}")
+    # 转换为torch张量
+    source_points_tensor = torch.from_numpy(source_points).float()
+    target_points_tensor = torch.from_numpy(target_points).float()
+    rotation_tensor = torch.from_numpy(rotation).float()
+    translation_tensor = torch.from_numpy(translation).float()
     
-    if target_points.shape[1] == 3 and target_points.shape[0] != 3:
-        print(f"转置点云: 从{target_points.shape}到", end="")
-        target_points = target_points.T
-        print(f"{target_points.shape}")
+    # Pytorch tensor 形状为 [Batch, Channel, Num]
+    if source_points_tensor.shape[0] != 1:
+        source_points_tensor = source_points_tensor.unsqueeze(0)
+    if target_points_tensor.shape[0] != 1:
+        target_points_tensor = target_points_tensor.unsqueeze(0)
     
+    print(f"保存为torch张量后源点云形状: {source_points_tensor.shape}")
+    print(f"保存为torch张量后目标点云形状: {target_points_tensor.shape}")
+    
+    # 保存为字典格式
     data_dict = {
-        'source': source_points,  
-        'target': target_points,
-        'rotation': rotation,
-        'translation': translation,
-        'grid': grid_shape,
+        'source': source_points_tensor,  # 源点云
+        'target': target_points_tensor,  # 目标点云
+        'rotation': rotation_tensor,   # 旋转矩阵
+        'translation': translation_tensor,  # 平移向量
+        'grid_shape': grid_shape,
         'x_origin': x_origin,
         'y_origin': y_origin,
         'z_origin': z_origin,
@@ -140,8 +152,27 @@ def create_pkl_file(source_points, target_points, rotation, translation, output_
         pickle.dump(data_dict, f)
     
     print(f"已保存到: {output_path}")
-    print(f"保存的源点云形状: {source_points.shape}")
-    print(f"保存的目标点云形状: {target_points.shape}")
+    print(f"保存的源点云形状: {source_points_tensor.shape}")
+    print(f"保存的目标点云形状: {target_points_tensor.shape}")
+
+def calculate_centroid_aligned_transformation(original_rotation, original_translation, centroid_diff):
+    """根据原始变换和质心偏差计算质心对齐的变换矩阵
+    
+    Args:
+        original_rotation: 原始旋转矩阵 [3, 3]
+        original_translation: 原始平移向量 [3]
+        centroid_diff: 质心偏差向量 [3]
+        
+    Returns:
+        新的平移向量，使得变换后的点云质心与源点云质心对齐
+    """
+    # 旋转矩阵保持不变
+    new_rotation = original_rotation.copy()
+    
+    # 计算新的平移向量：原平移向量 + 质心偏差
+    new_translation = original_translation + centroid_diff
+    
+    return new_rotation, new_translation
 
 def save_as_cif(coordinates, atom_types, atom_labels, original_cif, atom_lines, output_path):
     """将点云坐标保存为CIF格式"""
@@ -169,6 +200,99 @@ def save_as_cif(coordinates, atom_types, atom_labels, original_cif, atom_lines, 
     
     print(f"已保存目标点云为CIF格式: {output_path}")
 
+def save_as_cif_with_suffix(coordinates, atom_types, atom_labels, original_cif, atom_lines, output_path, suffix="_c"):
+    """将点云坐标保存为CIF格式，并添加自定义后缀"""
+    # 添加后缀到输出文件名
+    base_name, ext = os.path.splitext(output_path)
+    new_output_path = f"{base_name}{suffix}{ext}"
+    
+    # 复用现有函数逻辑
+    new_cif = original_cif.copy()
+    
+    # 更新原子坐标
+    for i, (coord, line_idx) in enumerate(zip(coordinates, atom_lines)):
+        x, y, z = coord
+        line = original_cif[line_idx].strip().split()
+        
+        # 保持原始行的格式，只更新坐标部分
+        line[10] = f"{x:.6f}"
+        line[11] = f"{y:.6f}"
+        line[12] = f"{z:.6f}"
+        
+        new_cif[line_idx] = "  ".join(line) + "\n"
+    
+    # 添加注释说明这是变换后的结构
+    header_comment = f"# This is a centroid-aligned transformed structure\n"
+    new_cif.insert(0, header_comment)
+    
+    # 写入新的CIF文件
+    with open(new_output_path, 'w') as f:
+        f.writelines(new_cif)
+    
+    print(f"已保存质心对齐点云为CIF格式: {new_output_path}")
+    
+    return new_output_path
+
+def calculate_centroid(point_cloud):
+    """计算点云的质心"""
+    # 确保点云是[N, 3]格式用于计算质心
+    if point_cloud.shape[0] == 3 and point_cloud.shape[1] != 3:
+        point_cloud = point_cloud.T
+    
+    # 计算质心
+    centroid = np.mean(point_cloud, axis=0)
+    return centroid
+
+def generate_centroid_aligned_cloud(source_cloud, target_cloud, rotation):
+    """生成质心对齐的目标点云
+    Args:
+        source_cloud: 源点云，形状为[N, 3]或[3, N]
+        target_cloud: 目标点云，形状为[N, 3]或[3, N]
+        rotation: 旋转矩阵，形状为[3, 3]
+    Returns:
+        aligned_cloud: 质心对齐的目标点云，与输入格式相同
+    """
+    # 确保点云是[N, 3]格式用于计算质心
+    source_format_is_3N = False
+    target_format_is_3N = False
+    
+    if source_cloud.shape[0] == 3 and source_cloud.shape[1] != 3:
+        source_format_is_3N = True
+        source_cloud_for_centroid = source_cloud.T
+    else:
+        source_cloud_for_centroid = source_cloud
+    
+    if target_cloud.shape[0] == 3 and target_cloud.shape[1] != 3:
+        target_format_is_3N = True
+        target_cloud_for_centroid = target_cloud.T
+    else:
+        target_cloud_for_centroid = target_cloud
+    
+    # 计算源点云和目标点云的质心
+    source_centroid = np.mean(source_cloud_for_centroid, axis=0)
+    target_centroid = np.mean(target_cloud_for_centroid, axis=0)
+    
+    # 计算质心偏差
+    centroid_diff = source_centroid - target_centroid
+    
+    # 根据质心偏差计算新的平移向量
+    # 注意：这里需要考虑旋转对质心的影响
+    # 我们需要使旋转后的点云质心与源点云质心对齐
+    
+    # 创建质心对齐的点云
+    if target_format_is_3N:
+        # 如果目标点云是[3, N]格式
+        aligned_cloud = target_cloud.copy()
+        # 添加平移来对齐质心，对于[3, N]格式，需要广播平移向量
+        aligned_cloud = aligned_cloud + centroid_diff.reshape(3, 1)
+    else:
+        # 如果目标点云是[N, 3]格式
+        aligned_cloud = target_cloud.copy()
+        # 添加平移来对齐质心
+        aligned_cloud = aligned_cloud + centroid_diff
+    
+    return aligned_cloud, centroid_diff
+
 def visualize_point_clouds(source, target, title="点云可视化"):
     """可视化源点云和目标点云"""
     fig = plt.figure(figsize=(10, 5))
@@ -189,106 +313,221 @@ def visualize_point_clouds(source, target, title="点云可视化"):
     # 默认不显示图像，只保存
     # plt.show()
 
-def process_batch(batch_dir, output_dir, visualize=False):
+def process_batch(batch_dir, output_dir, visualize=False, rotation_only=False):
     """批量处理指定目录下所有子文件夹中的xxxx_point.cif文件"""
     print(f"开始批处理目录: {batch_dir}")
+    print(f"只旋转不平移: {rotation_only}")
+    
+    # 遍历所有子文件夹
+    subdirs = [d for d in os.listdir(batch_dir) if os.path.isdir(os.path.join(batch_dir, d))]
+    
+    if not subdirs:
+        print(f"在 {batch_dir} 中未找到子文件夹")
+        return
+    
+    print(f"找到 {len(subdirs)} 个子文件夹")
     
     # 确保输出目录存在
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"创建输出目录: {output_dir}")
     
-    # 获取所有子文件夹
-    subdirectories = [os.path.join(batch_dir, d) for d in os.listdir(batch_dir) 
-                     if os.path.isdir(os.path.join(batch_dir, d))]
+    # 处理每个子文件夹中的 xxxx_point.cif 文件
+    total_files = 0
+    processed_files = 0
     
-    if not subdirectories:
-        print(f"警告: 在{batch_dir}中未找到子文件夹")
-        return
-    
-    total_processed = 0
-    
-    # 遍历每个子文件夹
-    for subdir in tqdm(subdirectories, desc="处理子文件夹"):
-        # 在子文件夹中查找符合条件的cif文件 (xxxx_point.cif)
-        cif_files = [f for f in os.listdir(subdir) 
-                    if os.path.isfile(os.path.join(subdir, f)) and f.endswith('_point.cif')]
+    for subdir in subdirs:
+        subdir_path = os.path.join(batch_dir, subdir)
+        subdir_output = os.path.join(output_dir, subdir)
         
-        if not cif_files:
-            print(f"在{subdir}中未找到xxxx_point.cif文件，跳过")
-            continue
-            
-        # 对每个找到的文件进行处理
-        for cif_file in cif_files:
-            cif_path = os.path.join(subdir, cif_file)
-            
-            # 创建对应的输出子目录（保持原有目录结构）
-            subdir_name = os.path.basename(subdir)
-            sub_output_dir = os.path.join(output_dir, subdir_name)
-            if not os.path.exists(sub_output_dir):
-                os.makedirs(sub_output_dir)
-            
+        # 确保子文件夹对应的输出目录存在
+        if not os.path.exists(subdir_output):
+            os.makedirs(subdir_output)
+        
+        # 查找所有 *_point.cif 文件
+        cif_files = glob.glob(os.path.join(subdir_path, '*_point.cif'))
+        total_files += len(cif_files)
+        
+        for cif_path in cif_files:
             try:
-                # 处理单个cif文件（复用现有函数）
-                process_single_file(cif_path, sub_output_dir, visualize)
-                total_processed += 1
+                process_single_file(cif_path, subdir_output, visualize, rotation_only)
+                processed_files += 1
             except Exception as e:
-                print(f"处理文件{cif_path}时出错: {e}")
+                print(f"处理文件 {cif_path} 时出错: {str(e)}")
     
-    print(f"批处理完成! 共处理了{total_processed}个文件")
+    print(f"批处理完成. 成功处理 {processed_files}/{total_files} 个文件")
 
-def process_single_file(cif_path, output_dir, visualize=False):
+def process_single_file(cif_path, output_dir, visualize=False, rotation_only=False):
     """处理单个cif文件"""
     print(f"处理文件: {cif_path}")
-    
-    # 获取输入cif文件的基本名称（不含路径和扩展名）
-    base_name = os.path.splitext(os.path.basename(cif_path))[0]
-    
-    # 生成输出文件路径
-    output_pkl = os.path.join(output_dir, f"{base_name}.pkl")
-    output_cif = os.path.join(output_dir, f"{base_name}_target.cif")
-    
-    print(f"输入CIF文件: {cif_path}")
-    print(f"输出PKL文件: {output_pkl}")
-    print(f"输出目标CIF文件: {output_cif}")
+    print(f"只旋转不平移: {rotation_only}")
     
     # 解析CIF文件
-    try:
-        point_cloud, atom_types, atom_labels, cif_content, atom_lines = parse_cif(cif_path)
-    except Exception as e:
-        print(f"解析CIF文件时出错：{e}")
-        raise e
+    point_cloud, atom_types, atom_labels, cif_content, atom_lines = parse_cif(cif_path)
     
-    print(f"成功提取点云数据，共 {len(point_cloud)} 个点")
+    # 保证输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 创建输出文件名
+    base_name = os.path.splitext(os.path.basename(cif_path))[0]
+    output_cif = os.path.join(output_dir, base_name + "_target.cif")
+    output_pkl = os.path.join(output_dir, base_name + "_train.pkl")
+    output_centroid_pkl = os.path.join(output_dir, base_name + "_train_c.pkl")
     
     # 生成随机旋转矩阵和平移向量
     rotation_matrix = random_rotation_matrix()
-    translation_vector = random_translation_vector()
     
+    # 是否应用平移
+    if rotation_only:
+        print("只应用旋转，不应用平移")
+        translation_vector = np.zeros(3, dtype=np.float32)  # 全零平移向量
+    else:
+        translation_vector = random_translation_vector()
+    
+    # 确保点云是[3, N]格式用于变换
+    if point_cloud.shape[1] == 3 and point_cloud.shape[0] != 3:
+        # 如果点云是[N, 3]格式，转换为[3, N]格式
+        point_cloud_for_transform = point_cloud.T
+    else:
+        point_cloud_for_transform = point_cloud.copy()
+    
+    # 应用变换
+    target_point_cloud = transform_point_cloud_numpy(
+        point_cloud_for_transform, 
+        rotation_matrix, 
+        translation_vector,
+        rotation_only
+    )
+    
+    print("变换矩阵信息:")
     print("旋转矩阵:")
     print(rotation_matrix)
     print("平移向量:")
     print(translation_vector)
     
-    # 变换点云生成目标点云 - 应用变换：R * point_cloud + t
-    target_point_cloud = transform_point_cloud_numpy(point_cloud, rotation_matrix, translation_vector)
-    
-    # 创建网格信息
+    # 为了符合PKL文件格式，创建网格信息
     grid_info = create_grid_info()
     
-    # 创建并保存pkl文件
-    create_pkl_file(point_cloud, target_point_cloud, rotation_matrix, translation_vector, output_pkl, grid_info)
+    # 创建并保存PKL文件
+    create_pkl_file(
+        point_cloud_for_transform, 
+        target_point_cloud, 
+        rotation_matrix, 
+        translation_vector, 
+        output_pkl, 
+        grid_info
+    )
     
-    # 将目标点云转置回[N, 3]格式，用于保存为CIF文件
-    target_point_cloud_for_cif = target_point_cloud.T
+    # 将目标点云转换回与源点云相同的格式以保存到CIF文件
+    if point_cloud.shape[1] == 3:
+        # 如果原始点云是[N, 3]格式，那么需要将目标点云从[3, N]转为[N, 3]
+        target_point_cloud_for_cif = target_point_cloud.T
+    else:
+        target_point_cloud_for_cif = target_point_cloud
     
     # 保存目标结构为CIF格式
     save_as_cif(target_point_cloud_for_cif, atom_types, atom_labels, cif_content, atom_lines, output_cif)
     
-    # 只有当明确指定--visualize参数时才执行可视化
+    # 计算质心对齐的点云并保存
+    source_centroid = calculate_centroid(point_cloud)
+    target_centroid = calculate_centroid(target_point_cloud)
+    
+    print("源点云质心:")
+    print(source_centroid)
+    print("目标点云质心:")
+    print(target_centroid)
+    
+    # 生成质心对齐的目标点云
+    centroid_aligned_cloud, centroid_diff = generate_centroid_aligned_cloud(point_cloud, target_point_cloud, rotation_matrix)
+    
+    print("质心偏差向量:")
+    print(centroid_diff)
+    
+    # 计算质心对齐的变换矩阵
+    centroid_aligned_rotation, centroid_aligned_translation = calculate_centroid_aligned_transformation(
+        rotation_matrix, translation_vector, centroid_diff
+    )
+    
+    print("质心对齐旋转矩阵:")
+    print(centroid_aligned_rotation)
+    print("质心对齐平移向量:")
+    print(centroid_aligned_translation)
+    
+    # 保存质心对齐的目标点云为CIF格式
+    if centroid_aligned_cloud.shape[0] == 3:
+        # 确保转换为[N, 3]格式
+        centroid_aligned_cloud_for_cif = centroid_aligned_cloud.T
+    else:
+        centroid_aligned_cloud_for_cif = centroid_aligned_cloud
+    
+    # 保存质心对齐的CIF文件
+    save_as_cif_with_suffix(
+        centroid_aligned_cloud_for_cif, 
+        atom_types, 
+        atom_labels, 
+        cif_content, 
+        atom_lines, 
+        output_cif,
+        suffix="_c"
+    )
+    
+    # 创建并保存质心对齐的pkl文件
+    create_pkl_file(
+        point_cloud_for_transform, 
+        centroid_aligned_cloud, 
+        centroid_aligned_rotation, 
+        centroid_aligned_translation, 
+        output_centroid_pkl, 
+        grid_info
+    )
+    
+    # 使用质心对齐的变换矩阵再次变换源点云，用于验证
+    print("使用质心对齐的变换矩阵再次变换源点云，生成验证文件...")
+    
+    # 应用质心对齐的变换矩阵到源点云
+    fixed_point_cloud = transform_point_cloud_numpy(
+        point_cloud_for_transform,
+        centroid_aligned_rotation,
+        centroid_aligned_translation
+    )
+    
+    # 将固定点云转换为与源点云相同的格式
+    if point_cloud.shape[1] == 3:
+        fixed_point_cloud_for_cif = fixed_point_cloud.T
+    else:
+        fixed_point_cloud_for_cif = fixed_point_cloud
+    
+    # 保存为fix.cif文件
+    output_fixed_cif = os.path.join(output_dir, base_name + "_fix.cif")
+    save_as_cif(
+        fixed_point_cloud_for_cif,
+        atom_types,
+        atom_labels,
+        cif_content,
+        atom_lines,
+        output_fixed_cif
+    )
+    
+    print(f"已保存验证用的固定点云文件: {output_fixed_cif}")
+    
+    # 计算验证点云的质心
+    fixed_centroid = calculate_centroid(fixed_point_cloud)
+    print("验证点云质心:")
+    print(fixed_centroid)
+    print("源点云质心:")
+    print(source_centroid)
+    print(f"质心差异: {np.linalg.norm(fixed_centroid - source_centroid)}")
+    
+    # 如果需要可视化，则同时可视化原始和质心对齐的点云
     if visualize:
         print("执行点云可视化...")
         visualize_point_clouds(point_cloud, target_point_cloud)
+        
+        # 额外可视化质心对齐的点云
+        if centroid_aligned_cloud.shape[0] == 3:
+            visualize_point_clouds(point_cloud.T, centroid_aligned_cloud, title="质心对齐点云可视化")
+        else:
+            visualize_point_clouds(point_cloud, centroid_aligned_cloud, title="质心对齐点云可视化")
     
     print(f"文件{cif_path}处理完成!")
 
@@ -298,6 +537,7 @@ def main():
     parser.add_argument('--batch_dir', type=str, help='批处理目录路径，指定该参数将进行批处理')
     parser.add_argument('--output_dir', type=str, default='.', help='输出文件保存目录')
     parser.add_argument('--visualize', action='store_true', help='是否可视化点云')
+    parser.add_argument('--rotation_only', action='store_true', help='是否只应用旋转变换，不应用平移')
     
     args = parser.parse_args()
     
@@ -308,7 +548,7 @@ def main():
             print(f"错误：批处理目录 {args.batch_dir} 不存在")
             return
         
-        process_batch(args.batch_dir, args.output_dir, args.visualize)
+        process_batch(args.batch_dir, args.output_dir, args.visualize, args.rotation_only)
     else:
         # 单文件处理模式
         if not args.cif_path:
@@ -326,7 +566,7 @@ def main():
             print(f"创建输出目录: {args.output_dir}")
         
         # 处理单个文件
-        process_single_file(args.cif_path, args.output_dir, args.visualize)
+        process_single_file(args.cif_path, args.output_dir, args.visualize, args.rotation_only)
         
         print("处理完成!")
 

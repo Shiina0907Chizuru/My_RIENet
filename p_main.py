@@ -455,6 +455,18 @@ class PointCloud_ca_Dataset(Dataset):
         self.data_files = glob.glob(os.path.join(data_dir, "*.pkl"))
         if not self.data_files:
             raise FileNotFoundError(f"No .pkl files found in directory: {data_dir}")
+            
+    def random_rotation_matrix(self):
+        """生成随机旋转矩阵"""
+        # 使用QR分解生成随机旋转矩阵
+        A = np.random.randn(3, 3)
+        Q, R = np.linalg.qr(A)
+        
+        # 确保是特殊正交矩阵(行列式为1)
+        if np.linalg.det(Q) < 0:
+            Q[:, 0] = -Q[:, 0]
+        
+        return Q.astype(np.float32)
 
     def __len__(self):
         # 返回文件夹中的 .pkl 文件个数
@@ -503,6 +515,42 @@ class PointCloud_ca_Dataset(Dataset):
             print(f"转置目标数据形状: 从{target.shape}到", end="")
             target = target.T
             print(f"{target.shape}")
+            
+        # 在这里添加数据增强（只在训练时应用）
+        # 通过文件夹名称判断是否为训练集
+        is_training = 'train' in os.path.basename(self.data_dir)
+        if is_training:
+            # 生成随机旋转矩阵
+            augment_rotation = self.random_rotation_matrix()
+            
+            # 保持源点云不变，只对目标点云应用随机旋转
+            # 目标点云应用随机旋转
+            target = np.matmul(augment_rotation, target)
+            
+            # 更新变换矩阵
+            # 新的旋转矩阵 = R_aug * R_original
+            rotation = np.matmul(augment_rotation, rotation)
+            # 新的平移向量 = R_aug * t_original
+            translation = np.matmul(augment_rotation, translation)
+            
+            # 添加质心对齐
+            # 计算源点云和目标点云的质心
+            source_centroid = np.mean(source, axis=1)
+            target_centroid = np.mean(target, axis=1)
+            
+            # 计算质心偏移向量（目标点云质心 - 源点云质心）
+            centroid_offset = target_centroid - source_centroid
+            
+            # 调整平移向量以保证质心对齐
+            # 新的平移向量 = 原平移向量 - 质心偏移
+            translation = translation - centroid_offset
+            
+            # 可以在训练时打印一些调试信息（根据需要开启）
+            # print("正在应用数据增强和质心对齐...")
+            # print(f"源点云质心: {source_centroid}")
+            # print(f"增强后目标点云质心: {target_centroid}")
+            # print(f"质心偏移向量: {centroid_offset}")
+            # print(f"调整后的平移向量: {translation}")
             
         # 转换为张量
         source = torch.tensor(source, dtype=torch.float32)  # 不再需要转置，因为已经转置好了

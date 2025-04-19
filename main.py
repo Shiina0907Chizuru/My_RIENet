@@ -135,6 +135,38 @@ def test(args, net, test_loader, boardio, textio):
         test_loss, test_rotations_ab, test_translations_ab, \
         test_rotations_ab_pred, \
         test_translations_ab_pred = test_one_epoch(args, net, test_loader)
+    
+    # 直接打印用户需要的四个值
+    textio.cprint("\n===== 真实和预测的旋转矩阵、平移向量 =====")
+    
+    # 为了避免输出过多，只打印前3个样本的数据
+    num_samples_to_print = min(3, test_rotations_ab.shape[0])
+    
+    for i in range(num_samples_to_print):
+        textio.cprint(f"\n样本 {i+1}:")
+        
+        textio.cprint("真实旋转矩阵:")
+        textio.cprint(f"{test_rotations_ab[i]}")
+        
+        textio.cprint("预测旋转矩阵:")
+        textio.cprint(f"{test_rotations_ab_pred[i]}")
+        
+        textio.cprint(f"真实平移向量: {test_translations_ab[i]}")
+        textio.cprint(f"预测平移向量: {test_translations_ab_pred[i]}")
+        
+        textio.cprint("-" * 50)
+    
+    # 保存所有数据到NumPy文件，方便后续分析
+    np.save(f'checkpoints/{args.exp_name}/rotations_ab_gt.npy', test_rotations_ab)
+    np.save(f'checkpoints/{args.exp_name}/rotations_ab_pred.npy', test_rotations_ab_pred) 
+    np.save(f'checkpoints/{args.exp_name}/translations_ab_gt.npy', test_translations_ab)
+    np.save(f'checkpoints/{args.exp_name}/translations_ab_pred.npy', test_translations_ab_pred)
+    
+    textio.cprint(f"\n所有结果已保存到 checkpoints/{args.exp_name}/ 目录下的以下文件:")
+    textio.cprint(f"- rotations_ab_gt.npy: 真实旋转矩阵")
+    textio.cprint(f"- rotations_ab_pred.npy: 预测旋转矩阵") 
+    textio.cprint(f"- translations_ab_gt.npy: 真实平移向量")
+    textio.cprint(f"- translations_ab_pred.npy: 预测平移向量")
 
     pred_transforms = torch.from_numpy(np.concatenate([test_rotations_ab_pred,test_translations_ab_pred.reshape(-1,3,1)], axis=-1))
     gt_transforms = torch.from_numpy(np.concatenate([test_rotations_ab,test_translations_ab.reshape(-1,3,1)], axis=-1))
@@ -311,7 +343,7 @@ def train(args, net, train_loader, test_loader, boardio, textio):
         boardio.add_scalar('A->B/train/rotation/MAE', train_r_mae_ab, epoch)
         boardio.add_scalar('A->B/train/translation/MSE', train_t_mse_ab, epoch)
         boardio.add_scalar('A->B/train/translation/RMSE', train_t_rmse_ab, epoch)
-        boardio.add_scalar('A->B/train/translation/MAE', train_t_mae_ab, epoch)
+        boardio.add_scalar('A->B/train/translation/MAE', train_t_mse_ab, epoch)
 
         ############TEST
         boardio.add_scalar('A->B/test/loss', test_loss, epoch)
