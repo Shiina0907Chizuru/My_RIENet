@@ -1,7 +1,9 @@
 import pickle
 
-# 读取PKL文件
-pkl_path = 'C:\\Users\\Z\\Desktop\\point_cloud_data.pkl'
+# # 读取PKL文件
+pkl_path = "C:\\Users\\Z\\Desktop\\7wqz_point_train_c.pkl"
+
+# pkl_path = "E:\\ZJUT\\Research\\MrZhouDeepLearning\\点云配准pointnet\\My_RIENet\\6coz_point_target_c_train_c.pkl"
 print(f"尝试读取文件: {pkl_path}")
 
 with open(pkl_path, 'rb') as f:

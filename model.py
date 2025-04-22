@@ -438,12 +438,12 @@ class RIENET(nn.Module):
                 consensus_loss
                 spatial_consistency_loss
         """
-        # source, target, rotation, translation,gird_shape,x_origin,y_origin,z_origin,x_voxel,nstart
+        # source, target, rotation, translation,grid_shape,x_origin,y_origin,z_origin,x_voxel,nstart
         src = input[0]
-        #print("src", src.shape)
+        print("src", src.shape)
         tgt = input[1]
 
-        gird_shape = input[2]
+        grid_shape = input[2]
 
         x_origin = input[3]
         y_origin = input[4]
@@ -495,7 +495,7 @@ class RIENET(nn.Module):
                                                                                translation_ab_pred_i, src_keypoints_knn,
                                                                                tgt_keypoints_knn, self.list_k2[i], src,
                                                                                tgt)
-            cc_loss_fn = RSCC_Loss(src,tgt,gird_shape,x_origin,y_origin,z_origin,x_voxel,nstart)
+            cc_loss_fn = RSCC_Loss(src,tgt,grid_shape,x_origin,y_origin,z_origin,x_voxel,nstart)
             # cc = cc_loss_fn.forward()  # 或者简写为 cc = cc_loss_fn()
             #print(f"Loss value: {cc}, requires_grad: {cc.requires_grad}")
 

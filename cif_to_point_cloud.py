@@ -125,11 +125,11 @@ def create_pkl_file(source_points, target_points, rotation, translation, output_
     rotation_tensor = torch.from_numpy(rotation).float()
     translation_tensor = torch.from_numpy(translation).float()
     
-    # Pytorch tensor 形状为 [Batch, Channel, Num]
-    if source_points_tensor.shape[0] != 1:
-        source_points_tensor = source_points_tensor.unsqueeze(0)
-    if target_points_tensor.shape[0] != 1:
-        target_points_tensor = target_points_tensor.unsqueeze(0)
+    # # Pytorch tensor 形状为 [Batch, Channel, Num]
+    # if source_points_tensor.shape[0] != 1:
+    #     source_points_tensor = source_points_tensor.unsqueeze(0)
+    # if target_points_tensor.shape[0] != 1:
+    #     target_points_tensor = target_points_tensor.unsqueeze(0)
     
     print(f"保存为torch张量后源点云形状: {source_points_tensor.shape}")
     print(f"保存为torch张量后目标点云形状: {target_points_tensor.shape}")
@@ -321,39 +321,63 @@ def process_batch(batch_dir, output_dir, visualize=False, rotation_only=False):
     # 遍历所有子文件夹
     subdirs = [d for d in os.listdir(batch_dir) if os.path.isdir(os.path.join(batch_dir, d))]
     
-    if not subdirs:
-        print(f"在 {batch_dir} 中未找到子文件夹")
-        return
-    
-    print(f"找到 {len(subdirs)} 个子文件夹")
-    
     # 确保输出目录存在
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"创建输出目录: {output_dir}")
     
-    # 处理每个子文件夹中的 xxxx_point.cif 文件
     total_files = 0
     processed_files = 0
     
-    for subdir in subdirs:
-        subdir_path = os.path.join(batch_dir, subdir)
-        subdir_output = os.path.join(output_dir, subdir)
+    if not subdirs:
+        print(f"在 {batch_dir} 中未找到子文件夹，将直接在该目录中搜索cif文件")
         
-        # 确保子文件夹对应的输出目录存在
-        if not os.path.exists(subdir_output):
-            os.makedirs(subdir_output)
-        
-        # 查找所有 *_point.cif 文件
-        cif_files = glob.glob(os.path.join(subdir_path, '*_point.cif'))
-        total_files += len(cif_files)
+        # 直接在当前目录中查找所有 *_point.cif 文件
+        cif_files = glob.glob(os.path.join(batch_dir, '*_point.cif'))
+        total_files = len(cif_files)
         
         for cif_path in cif_files:
             try:
-                process_single_file(cif_path, subdir_output, visualize, rotation_only)
+                # 为每个CIF文件创建单独的子目录
+                base_name = os.path.splitext(os.path.basename(cif_path))[0]
+                file_output_dir = os.path.join(output_dir, base_name)
+                if not os.path.exists(file_output_dir):
+                    os.makedirs(file_output_dir)
+                    print(f"创建CIF文件对应的输出子目录: {file_output_dir}")
+                
+                process_single_file(cif_path, file_output_dir, visualize, rotation_only)
                 processed_files += 1
             except Exception as e:
                 print(f"处理文件 {cif_path} 时出错: {str(e)}")
+    else:
+        print(f"找到 {len(subdirs)} 个子文件夹")
+        
+        # 处理每个子文件夹中的 xxxx_point.cif 文件
+        for subdir in subdirs:
+            subdir_path = os.path.join(batch_dir, subdir)
+            subdir_output = os.path.join(output_dir, subdir)
+            
+            # 确保子文件夹对应的输出目录存在
+            if not os.path.exists(subdir_output):
+                os.makedirs(subdir_output)
+            
+            # 查找所有 *_point.cif 文件
+            cif_files = glob.glob(os.path.join(subdir_path, '*_point.cif'))
+            total_files += len(cif_files)
+            
+            for cif_path in cif_files:
+                try:
+                    # 为每个CIF文件创建单独的子目录
+                    base_name = os.path.splitext(os.path.basename(cif_path))[0]
+                    file_output_dir = os.path.join(subdir_output, base_name)
+                    if not os.path.exists(file_output_dir):
+                        os.makedirs(file_output_dir)
+                        print(f"创建CIF文件对应的输出子目录: {file_output_dir}")
+                    
+                    process_single_file(cif_path, file_output_dir, visualize, rotation_only)
+                    processed_files += 1
+                except Exception as e:
+                    print(f"处理文件 {cif_path} 时出错: {str(e)}")
     
     print(f"批处理完成. 成功处理 {processed_files}/{total_files} 个文件")
 

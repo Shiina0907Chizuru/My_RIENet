@@ -80,7 +80,7 @@ def test_one_epoch(args, net, test_loader):
 
         # 打印点云形状信息、k值和其他关键参数
         print(f"点云形状: source={src.shape}, target={target.shape}")
-        print(f"网格形状: {grid_shape}")
+        print(f"网格形状: {grid_shape}")    
         print(f"配置k值: list_k1={args.list_k1[:3]}..., list_k2={args.list_k2[:3]}...")
         print(f"x_origin类型: {type(x_origin)}, 形状: {x_origin.shape if torch.is_tensor(x_origin) else '非张量'}")
         print(f"y_origin类型: {type(y_origin)}, 形状: {y_origin.shape if torch.is_tensor(y_origin) else '非张量'}")
@@ -120,6 +120,8 @@ def train_one_epoch(args, net, train_loader, opt):
     for src, target, rotation_ab, translation_ab,grid_shape,x_origin,y_origin,z_origin,x_voxel,nstart in tqdm(train_loader):
         src = src.cuda()
         target = target.cuda()
+        print(f"传入网络前 src 形状: {src.shape}, 类型: {src.dtype}")
+        print(f"传入网络前 target 形状: {target.shape}, 类型: {target.dtype}")
         rotation_ab = rotation_ab.cuda()
         translation_ab = translation_ab.cuda()
 
@@ -132,6 +134,26 @@ def train_one_epoch(args, net, train_loader, opt):
         x_voxel = torch.tensor(x_voxel, dtype=torch.float32).to(device)
         nstart = torch.tensor(nstart, dtype=torch.long).to(device)
         '''
+         # 在test_one_epoch的数中添加
+        if src.shape[1] != 3:
+            print(f"调整源点云格式: 从{src.shape}到", end="")
+            src = src.transpose(1, 2)  # 从[B, N, 3]转置为[B, 3, N]
+            print(f"{src.shape}")
+        
+        if target.shape[1] != 3:
+            print(f"调整目标点云格式: 从{target.shape}到", end="")
+            target = target.transpose(1, 2)  # 从[B, N, 3]转置为[B, 3, N]
+            print(f"{target.shape}")
+
+        # 打印点云形状信息、k值和其他关键参数
+        print(f"点云形状: source={src.shape}, target={target.shape}")
+        print(f"网格形状: {grid_shape}")
+        print(f"配置k值: list_k1={args.list_k1[:3]}..., list_k2={args.list_k2[:3]}...")
+        print(f"x_origin类型: {type(x_origin)}, 形状: {x_origin.shape if torch.is_tensor(x_origin) else '非张量'}")
+        print(f"y_origin类型: {type(y_origin)}, 形状: {y_origin.shape if torch.is_tensor(y_origin) else '非张量'}")
+        print(f"z_origin类型: {type(z_origin)}, 形状: {z_origin.shape if torch.is_tensor(z_origin) else '非张量'}")
+        print(f"x_voxel类型: {type(x_voxel)}, 形状: {x_voxel.shape if torch.is_tensor(x_voxel) else '非张量'}")
+        print(f"nstart类型: {type(nstart)}, 形状: {nstart.shape if torch.is_tensor(nstart) else '非张量'}")
 
         batch_size = src.size(0)
         opt.zero_grad()
@@ -486,7 +508,7 @@ class PointCloud_ca_Dataset(Dataset):
         rotation = np.array(data_dict['rotation'], dtype='float32')
         translation = np.array(data_dict['translation'], dtype='float32')
 
-        gird_shape = np.array(data_dict['grid'], dtype='int')
+        grid_shape = np.array(data_dict['grid_shape'], dtype='int')
 
         x_origin = np.array(data_dict['x_origin'], dtype='float32')
         y_origin = np.array(data_dict['y_origin'], dtype='float32')
@@ -569,7 +591,7 @@ class PointCloud_ca_Dataset(Dataset):
         #nstart = torch.tensor(nstart, dtype=torch.int)
 
         # 返回一个元组（source, target, rotation, translation）
-        return source, target, rotation, translation,gird_shape,x_origin,y_origin,z_origin,x_voxel,nstart
+        return source, target, rotation, translation,grid_shape,x_origin,y_origin,z_origin,x_voxel,nstart
 def main():
     args = parse_args_from_yaml(sys.argv[1])
     torch.backends.cudnn.deterministic = True
@@ -589,14 +611,15 @@ def main():
         # 只在非评估模式（训练模式）下加载训练数据集
         train_loader = None
         if not args.eval:
-            train_path = "/xiangyux/point/RIENet-main/data/ca_map_train"
+            # train_path = "/xiangyux/point/RIENet-main/data/ca_map_train"
+            train_path = "/zhaoxuanj/Point_dataset/5000down_c_pkl"
             train_data = PointCloud_ca_Dataset(train_path)
             train_loader = DataLoader(train_data, args.batch_size, drop_last=True, shuffle=True)
             print("训练数据集已加载")
         
         # 测试数据集总是加载
         #test_path = "/xiangyux/point/RIENet-main/data/ca_test"
-        test_path = "/zhaoxuanj/point/My_RIENet/test_data/testpkl"
+        test_path = "/zhaoxuanj/Point_dataset/5000down_c_pkl"
         test_data = PointCloud_ca_Dataset(test_path)
         test_loader = DataLoader(test_data, args.batch_size, drop_last=False, shuffle=False)
         print("测试数据集已加载")
