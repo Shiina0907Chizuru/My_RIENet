@@ -203,17 +203,9 @@ def process_pair(source_cif, target_cif, output_dir, visualize=False):
     output_source_cif = os.path.join(output_dir, f"{output_base_name}_source.cif")
     output_target_cif = os.path.join(output_dir, f"{output_base_name}_target.cif")
     
-    # 检查点云大小是否匹配
+    # 记录点云大小信息，但不再强制匹配大小
     if source_points.shape[0] != target_points.shape[0]:
-        print(f"警告：源点云({source_points.shape[0]}个点)和目标点云({target_points.shape[0]}个点)大小不匹配")
-        # 统一点云大小（取较小的一方）
-        min_size = min(source_points.shape[0], target_points.shape[0])
-        print(f"截取两个点云到相同大小: {min_size}个点")
-        source_points = source_points[:min_size]
-        target_points = target_points[:min_size]
-        source_atom_types = source_atom_types[:min_size]
-        source_atom_labels = source_atom_labels[:min_size]
-        source_atom_lines = source_atom_lines[:min_size]
+        print(f"注意：源点云有 {source_points.shape[0]} 个点，目标点云有 {target_points.shape[0]} 个点")
     
     # 确保点云为[3, N]格式用于处理
     point_cloud_for_transform = source_points.T if source_points.shape[1] == 3 else source_points
