@@ -502,23 +502,64 @@ class PointCloud_ca_Dataset(Dataset):
         with open(data_file, 'rb') as f:
             data_dict = pickle.load(f)
 
-        # 从数据字典中提取所需的数据
+        # 首先检测PKL文件版本
+        is_new_version = False
+        is_normalized = False
+        scale_factor = 1.0
+        original_centroid = np.zeros(3, dtype=np.float32)
+        
+        # 检查是否包含grid_info (新版本特征)
+        if 'grid_info' in data_dict and isinstance(data_dict['grid_info'], dict):
+            is_new_version = True
+            print(f"检测到新版本PKL文件: {data_file}")
+            
+            # 检查是否是归一化数据
+            grid_info = data_dict['grid_info']
+            if 'normalized' in grid_info and grid_info['normalized']:
+                is_normalized = True
+                scale_factor = float(grid_info['scale_factor'])
+                original_centroid = np.array(grid_info['original_centroid'], dtype=np.float32)
+                print(f"检测到归一化数据, 缩放因子: {scale_factor}, 原始质心: {original_centroid}")
+        # 直接检查顶层字典是否包含normalized键（旧格式归一化）
+        elif 'normalized' in data_dict and data_dict['normalized']:
+            is_normalized = True
+            scale_factor = float(data_dict['scale_factor'])
+            original_centroid = np.array(data_dict['original_centroid'], dtype=np.float32)
+            print(f"检测到旧版本归一化数据, 缩放因子: {scale_factor}, 原始质心: {original_centroid}")
+        else:
+            print(f"检测到旧版本非归一化PKL文件: {data_file}")
+
+        # 根据版本和归一化状态提取数据
+        # 从数据字典中提取基础数据（所有版本都应该有）
         source = np.array(data_dict['source'], dtype='float32')
         target = np.array(data_dict['target'], dtype='float32')
         rotation = np.array(data_dict['rotation'], dtype='float32')
         translation = np.array(data_dict['translation'], dtype='float32')
 
-        grid_shape = np.array(data_dict['grid_shape'], dtype='int')
+        # 设置默认的网格形状和其他参数
+        default_grid_shape = np.array([32, 32, 32], dtype=np.int32)
+        default_origin = np.array([0.0], dtype=np.float32)
+        default_voxel = np.array([0.1], dtype=np.float32)
+        default_nstart = np.array([0], dtype=np.int32)
 
-        x_origin = np.array(data_dict['x_origin'], dtype='float32')
-        y_origin = np.array(data_dict['y_origin'], dtype='float32')
-        z_origin = np.array(data_dict['z_origin'], dtype='float32')
-        x_voxel  = np.array(data_dict['x_voxel'], dtype='float32')
-        nstart = np.array(data_dict['nstart'], dtype=np.int32)  
-
-        # 增加错误处理和调试信息
-        if 'nstart' not in data_dict:
-            raise KeyError("Key 'nstart' not found in data dictionary")
+        # 根据版本提取或设置网格参数
+        if is_new_version:
+            # 新版本从grid_info中提取
+            grid_info = data_dict['grid_info']
+            grid_shape = np.array(grid_info.get('grid_shape', default_grid_shape), dtype=np.int32)
+            x_origin = np.array(grid_info.get('x_origin', default_origin), dtype=np.float32)
+            y_origin = np.array(grid_info.get('y_origin', default_origin), dtype=np.float32)
+            z_origin = np.array(grid_info.get('z_origin', default_origin), dtype=np.float32)
+            x_voxel = np.array(grid_info.get('x_voxel', default_voxel), dtype=np.float32)
+            nstart = np.array(grid_info.get('nstart', default_nstart), dtype=np.int32)
+        else:
+            # 旧版本直接从数据字典中提取，如果不存在则使用默认值
+            grid_shape = np.array(data_dict.get('grid_shape', default_grid_shape), dtype=np.int32)
+            x_origin = np.array(data_dict.get('x_origin', default_origin), dtype=np.float32)
+            y_origin = np.array(data_dict.get('y_origin', default_origin), dtype=np.float32)
+            z_origin = np.array(data_dict.get('z_origin', default_origin), dtype=np.float32)
+            x_voxel = np.array(data_dict.get('x_voxel', default_voxel), dtype=np.float32)
+            nstart = np.array(data_dict.get('nstart', default_nstart), dtype=np.int32)
         
         # 数据预处理：确保点云形状正确
         # 注意：原始数据为[N, 3]，我们需要转换为[3, N]
@@ -555,43 +596,20 @@ class PointCloud_ca_Dataset(Dataset):
             # 新的平移向量 = R_aug * t_original
             translation = np.matmul(augment_rotation, translation)
             
-            # 添加质心对齐
-            # 计算源点云和目标点云的质心
-            source_centroid = np.mean(source, axis=1)
-            target_centroid = np.mean(target, axis=1)
-            
-            # 计算质心偏移向量（目标点云质心 - 源点云质心）
-            centroid_offset = target_centroid - source_centroid
-            
-            # 调整平移向量以保证质心对齐
-            # 新的平移向量 = 原平移向量 - 质心偏移
-            translation = translation - centroid_offset
-            
-            # 可以在训练时打印一些调试信息（根据需要开启）
-            # print("正在应用数据增强和质心对齐...")
-            # print(f"源点云质心: {source_centroid}")
-            # print(f"增强后目标点云质心: {target_centroid}")
-            # print(f"质心偏移向量: {centroid_offset}")
-            # print(f"调整后的平移向量: {translation}")
-            
         # 转换为张量
-        source = torch.tensor(source, dtype=torch.float32)  # 不再需要转置，因为已经转置好了
+        source = torch.tensor(source, dtype=torch.float32)
         target = torch.tensor(target, dtype=torch.float32)
         rotation = torch.tensor(rotation, dtype=torch.float32)
         translation = torch.tensor(translation, dtype=torch.float32)
 
-        #gird_shape = torch.tensor(gird_shape, dtype=torch.int)
+        # 如果是归一化数据，调整平移向量
+        if is_normalized:
+            # 调整平移向量，乘以缩放因子，因为现在点云被缩放了
+            translation = translation * scale_factor
+            print(f"已调整平移向量（乘以缩放因子 {scale_factor}）")
 
-        #x_origin = torch.tensor(x_origin, dtype=torch.float32)
-        #y_origin = torch.tensor(y_origin, dtype=torch.float32)
-        #z_origin = torch.tensor(z_origin, dtype=torch.float32)
-
-        #x_voxel = torch.tensor(x_voxel, dtype=torch.float32)
-
-        #nstart = torch.tensor(nstart, dtype=torch.int)
-
-        # 返回一个元组（source, target, rotation, translation）
-        return source, target, rotation, translation,grid_shape,x_origin,y_origin,z_origin,x_voxel,nstart
+        # 返回一个元组
+        return source, target, rotation, translation, grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart
 def main():
     args = parse_args_from_yaml(sys.argv[1])
     torch.backends.cudnn.deterministic = True
@@ -612,14 +630,14 @@ def main():
         train_loader = None
         if not args.eval:
             # train_path = "/xiangyux/point/RIENet-main/data/ca_map_train"
-            train_path = "/zhaoxuanj/Point_dataset/non_homogeneous_ca_pkl"
+            train_path = "/zhaoxuanj/Point_dataset/normalize_data/5000down_c_pkl"
             train_data = PointCloud_ca_Dataset(train_path)
             train_loader = DataLoader(train_data, args.batch_size, drop_last=True, shuffle=True)
             print("训练数据集已加载")
         
         # 测试数据集总是加载
         #test_path = "/xiangyux/point/RIENet-main/data/ca_test"
-        test_path = "/zhaoxuanj/Point_dataset/non_homogeneous_ca_pkl"
+        test_path = "/zhaoxuanj/Point_dataset/normalize_data/5000down_c_pkl"
         test_data = PointCloud_ca_Dataset(test_path)
         test_loader = DataLoader(test_data, args.batch_size, drop_last=False, shuffle=False)
         print("测试数据集已加载")

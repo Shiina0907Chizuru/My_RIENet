@@ -61,7 +61,51 @@ def parse_cif(cif_path):
     # 转换为numpy数组
     return np.array(atoms, dtype=np.float32), atom_types, atom_labels, cif_content, atom_lines
 
-def create_grid_info():
+def normalize_point_cloud(points):
+    """
+    将点云归一化到[-1, 1]范围，并确保质心在原点
+    
+    参数:
+        points: 形状为[N, 3]或[3, N]的点云数据
+    
+    返回:
+        normalized_points: 归一化后的点云
+        scale_factor: 归一化使用的缩放因子
+        centroid: 原始点云的质心
+    """
+    # 确保点云形状为[N, 3]
+    transpose_needed = False
+    if points.shape[0] == 3 and points.shape[1] != 3:
+        points = points.T
+        transpose_needed = True
+    
+    # 计算质心并平移到原点
+    centroid = np.mean(points, axis=0)
+    centered_points = points - centroid
+    
+    # 计算在各个维度上的最大绝对值，用于缩放
+    max_abs = np.max(np.abs(centered_points), axis=0)  # 对每个维度单独计算
+    overall_max = np.max(max_abs)  # 使用整体最大值确保比例一致
+    scale_factor = overall_max
+    
+    # 归一化到[-1, 1]范围
+    normalized_points = centered_points / scale_factor
+    
+    # 打印详细信息，帮助调试
+    print(f"原始点云维度: {points.shape}")
+    print(f"各维度最大绝对值: {max_abs}")
+    print(f"使用的缩放因子: {scale_factor}")
+    print(f"归一化后点云范围: X[{np.min(normalized_points[:,0]):.4f}, {np.max(normalized_points[:,0]):.4f}], "
+          f"Y[{np.min(normalized_points[:,1]):.4f}, {np.max(normalized_points[:,1]):.4f}], "
+          f"Z[{np.min(normalized_points[:,2]):.4f}, {np.max(normalized_points[:,2]):.4f}]")
+    
+    # 如果需要，转置回原始形状
+    if transpose_needed:
+        normalized_points = normalized_points.T
+    
+    return normalized_points, scale_factor, centroid
+
+def create_grid_info(normalize=False):
     """创建体素网格信息"""
     # 这里生成一些默认值，实际应用中需要根据点云范围来确定
     grid_shape = np.array([64, 64, 64], dtype=np.int32)
@@ -72,6 +116,12 @@ def create_grid_info():
     z_origin = np.array([0.0], dtype=np.float32)
     x_voxel = np.array([0.05], dtype=np.float32)  # 体素大小
     nstart = np.array([32], dtype=np.int32)  # 起始索引
+    
+    if normalize:
+        x_origin = np.array([-1.0], dtype=np.float32)
+        y_origin = np.array([-1.0], dtype=np.float32)
+        z_origin = np.array([-1.0], dtype=np.float32)
+        x_voxel = np.array([2.0 / grid_shape[0]], dtype=np.float32)  # 体素大小
     
     return grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart
 
@@ -87,13 +137,17 @@ def calculate_centroid(point_cloud):
     
     return centroid
 
-def create_pkl_file(source_points, target_points, output_path, grid_info):
+def create_pkl_file(source_points, target_points, output_path, grid_info, normalize=False):
     """创建pkl文件，保存为PointCloud_ca_Dataset格式，旋转平移矩阵置零"""
     grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart = grid_info
     
     # 检查点云形状并打印信息
     print(f"保存前源点云形状: {source_points.shape}")
     print(f"保存前目标点云形状: {target_points.shape}")
+    
+    if normalize:
+        source_points, _, _ = normalize_point_cloud(source_points)
+        target_points, _, _ = normalize_point_cloud(target_points)
     
     # 转换为torch张量
     source_points_tensor = torch.from_numpy(source_points).float()
@@ -179,7 +233,7 @@ def visualize_point_clouds(source, target, title="点云可视化"):
     plt.tight_layout()
     plt.show()
 
-def process_pair(source_cif, target_cif, output_dir, visualize=False):
+def process_pair(source_cif, target_cif, output_dir, visualize=False, normalize=False):
     """处理一对CIF文件，创建点云数据"""
     print(f"处理源文件: {source_cif}")
     print(f"处理目标文件: {target_cif}")
@@ -212,14 +266,14 @@ def process_pair(source_cif, target_cif, output_dir, visualize=False):
     target_point_cloud = target_points.T if target_points.shape[1] == 3 else target_points
     
     # 创建网格信息
-    grid_info = create_grid_info()
+    grid_info = create_grid_info(normalize=normalize)
     
     # 保存源点云和目标点云为CIF文件
     save_as_cif(source_points, source_atom_types, source_atom_labels, source_cif_content, source_atom_lines, output_source_cif)
     save_as_cif(target_points, target_atom_types, target_atom_labels, target_cif_content, target_atom_lines, output_target_cif)
     
     # 创建并保存PKL文件（旋转平移矩阵置零）
-    create_pkl_file(point_cloud_for_transform, target_point_cloud, output_pkl, grid_info)
+    create_pkl_file(point_cloud_for_transform, target_point_cloud, output_pkl, grid_info, normalize=normalize)
     
     # 如果需要可视化，则可视化点云
     if visualize:
@@ -229,7 +283,7 @@ def process_pair(source_cif, target_cif, output_dir, visualize=False):
     print(f"文件对{source_cif}和{target_cif}处理完成!")
     return output_pkl, output_source_cif, output_target_cif
 
-def batch_process(source_dir, target_dir, output_dir, visualize=False):
+def batch_process(source_dir, target_dir, output_dir, visualize=False, normalize=False):
     """批量处理两个目录中的CIF文件对"""
     # 获取所有源CIF文件
     source_files = glob.glob(os.path.join(source_dir, "*.cif"))
@@ -255,7 +309,7 @@ def batch_process(source_dir, target_dir, output_dir, visualize=False):
     # 处理每对文件
     for i, source_file in enumerate(tqdm(source_files, desc="处理源文件")):
         for target_file in tqdm(target_files, desc=f"处理源文件 {i+1}/{len(source_files)} 的目标文件", leave=False):
-            process_pair(source_file, target_file, output_dir, visualize)
+            process_pair(source_file, target_file, output_dir, visualize, normalize)
     
     print("批量处理完成!")
 
@@ -267,16 +321,17 @@ def main():
     parser.add_argument('--target_dir', type=str, help='目标CIF文件目录，用于批处理')
     parser.add_argument('--output_dir', type=str, default='output', help='输出目录')
     parser.add_argument('--visualize', action='store_true', help='是否可视化点云')
+    parser.add_argument('--normalize', action='store_true', help='是否归一化点云')
     
     args = parser.parse_args()
     
     # 检查参数组合
     if (args.source_cif and args.target_cif):
         # 单对文件处理模式
-        process_pair(args.source_cif, args.target_cif, args.output_dir, args.visualize)
+        process_pair(args.source_cif, args.target_cif, args.output_dir, args.visualize, args.normalize)
     elif (args.source_dir and args.target_dir):
         # 批处理模式
-        batch_process(args.source_dir, args.target_dir, args.output_dir, args.visualize)
+        batch_process(args.source_dir, args.target_dir, args.output_dir, args.visualize, args.normalize)
     else:
         parser.print_help()
         print("\n错误：请提供有效的参数组合：")

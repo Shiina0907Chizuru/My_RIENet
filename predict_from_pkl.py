@@ -109,41 +109,104 @@ class PredictionDataset:
         # 尝试提取变换矩阵（如果有）- 仅用于参考
         if 'rotation' in data:
             self.rotation = data['rotation'].clone().detach() if isinstance(data['rotation'], torch.Tensor) else torch.tensor(data['rotation'], dtype=torch.float32)
-        elif 'rot' in data:
-            self.rotation = data['rot'].clone().detach() if isinstance(data['rot'], torch.Tensor) else torch.tensor(data['rot'], dtype=torch.float32)
         else:
             self.rotation = None
             
         if 'translation' in data:
             self.translation = data['translation'].clone().detach() if isinstance(data['translation'], torch.Tensor) else torch.tensor(data['translation'], dtype=torch.float32)
-        elif 't' in data:
-            self.translation = data['t'].clone().detach() if isinstance(data['t'], torch.Tensor) else torch.tensor(data['t'], dtype=torch.float32)
         else:
             self.translation = None
+            
+        # 提取网格信息
+        if 'grid_shape' in data:
+            self.grid_shape = data['grid_shape']
+        else:
+            # 默认网格形状
+            self.grid_shape = np.array([32, 32, 32], dtype=np.int32)
+            
+        if 'x_origin' in data:
+            self.x_origin = data['x_origin']
+        else:
+            self.x_origin = -1.0
+            
+        if 'y_origin' in data:
+            self.y_origin = data['y_origin']
+        else:
+            self.y_origin = -1.0
+            
+        if 'z_origin' in data:
+            self.z_origin = data['z_origin']
+        else:
+            self.z_origin = -1.0
+            
+        if 'x_voxel' in data:
+            self.x_voxel = data['x_voxel']
+        else:
+            self.x_voxel = 2.0 / self.grid_shape[0]
+            
+        if 'nstart' in data:
+            self.nstart = data['nstart']
+        else:
+            self.nstart = np.array([0], dtype=np.int32)
+            
+        # 检查是否有归一化信息
+        self.is_normalized = False
+        self.scale_factor = 1.0
+        self.original_centroid = np.zeros(3, dtype=np.float32)
         
-        # 获取网格信息（如果存在）
-        self.grid_shape = data.get('grid_shape', torch.tensor(np.array([64, 64, 64], dtype=np.int32)))
-        self.x_origin = data.get('x_origin', torch.tensor(np.array([0.0], dtype=np.float32)))
-        self.y_origin = data.get('y_origin', torch.tensor(np.array([0.0], dtype=np.float32)))
-        self.z_origin = data.get('z_origin', torch.tensor(np.array([0.0], dtype=np.float32)))
-        self.x_voxel = data.get('x_voxel', torch.tensor(np.array([0.05], dtype=np.float32)))
-        self.nstart = data.get('nstart', torch.tensor(np.array([32], dtype=np.int32)))
+        # 检查grid_info中是否包含normalized键（新格式）
+        if 'grid_info' in data and isinstance(data['grid_info'], dict):
+            grid_info = data['grid_info']
+            if 'normalized' in grid_info and grid_info['normalized']:
+                self.is_normalized = True
+                self.scale_factor = float(grid_info['scale_factor'])
+                self.original_centroid = np.array(grid_info['original_centroid'], dtype=np.float32)
+                print(f"检测到归一化数据, 缩放因子: {self.scale_factor}, 原始质心: {self.original_centroid}")
+        # 直接检查顶层字典是否包含normalized键（旧格式）
+        elif 'normalized' in data and data['normalized']:
+            self.is_normalized = True
+            self.scale_factor = float(data['scale_factor'])
+            self.original_centroid = np.array(data['original_centroid'], dtype=np.float32)
+            print(f"检测到归一化数据(旧格式), 缩放因子: {self.scale_factor}, 原始质心: {self.original_centroid}")
         
-        print(f"已加载源点云数据，形状: {self.source.shape}")
-        print(f"已加载目标点云数据，形状: {self.target.shape}")
+        # 确保点云形状正确（[3, N]格式）
+        if self.source.shape[0] != 3 and self.source.shape[1] == 3:
+            print(f"转置源点云形状: 从{self.source.shape}到", end="")
+            self.source = self.source.T
+            print(f"{self.source.shape}")
+            
+        if self.target.shape[0] != 3 and self.target.shape[1] == 3:
+            print(f"转置目标点云形状: 从{self.target.shape}到", end="")
+            self.target = self.target.T
+            print(f"{self.target.shape}")
+            
+        # 输出形状信息
+        print(f"源点云形状: {self.source.shape}")
+        print(f"目标点云形状: {self.target.shape}")
         if self.rotation is not None:
             print(f"参考旋转矩阵形状: {self.rotation.shape}")
         if self.translation is not None:
             print(f"参考平移向量形状: {self.translation.shape}")
         print(f"网格信息: grid_shape={self.grid_shape}")
-
+        if self.is_normalized:
+            print(f"点云已归一化: scale_factor={self.scale_factor}, original_centroid={self.original_centroid}")
+            
     def __len__(self):
-        return 1  # 只有一个样本
-
+        return 1  # 每个PKL文件只有一对点云
+        
     def __getitem__(self, idx):
-        # 返回源点云、目标点云以及网格信息
-        return (self.source, self.target, self.grid_shape, self.x_origin, 
-                self.y_origin, self.z_origin, self.x_voxel, self.nstart)
+        # 返回点云数据和其他必要的参数
+        if idx != 0:
+            raise IndexError("索引超出范围")
+            
+        # 返回归一化信息
+        normalization_info = {
+            'is_normalized': self.is_normalized,
+            'scale_factor': self.scale_factor,
+            'original_centroid': self.original_centroid
+        }
+        
+        return self.source, self.target, self.grid_shape, self.x_origin, self.y_origin, self.z_origin, self.x_voxel, self.nstart, normalization_info
 
 def predict_transformation(args, net, dataset):
     """使用模型预测变换，不计算与真实值的loss"""
@@ -151,7 +214,7 @@ def predict_transformation(args, net, dataset):
     
     with torch.no_grad():
         # 获取源点云数据和目标点云数据以及其他需要的参数
-        source, target, grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart = dataset[0]
+        source, target, grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart, normalization_info = dataset[0]
         
         # 确保数据格式正确 [B, 3, N]
         if source.shape[0] != 3:
@@ -161,31 +224,34 @@ def predict_transformation(args, net, dataset):
             
         # 添加批次维度
         source = source.unsqueeze(0).cuda()
-        target = target.unsqueeze(0).cuda()  # 使用实际的目标点云
+        target = target.unsqueeze(0).cuda()
         
-        # 确保网格参数有正确的维度和类型
-        grid_shape = grid_shape.cuda() if isinstance(grid_shape, torch.Tensor) else torch.tensor(grid_shape, dtype=torch.int32).cuda()
-        x_origin = x_origin.cuda() if isinstance(x_origin, torch.Tensor) else torch.tensor(x_origin, dtype=torch.float32).cuda()
-        y_origin = y_origin.cuda() if isinstance(y_origin, torch.Tensor) else torch.tensor(y_origin, dtype=torch.float32).cuda()
-        z_origin = z_origin.cuda() if isinstance(z_origin, torch.Tensor) else torch.tensor(z_origin, dtype=torch.float32).cuda()
-        x_voxel = x_voxel.cuda() if isinstance(x_voxel, torch.Tensor) else torch.tensor(x_voxel, dtype=torch.float32).cuda()
-        nstart = nstart.cuda() if isinstance(nstart, torch.Tensor) else torch.tensor(nstart, dtype=torch.int32).cuda()
+        # 打印归一化信息
+        is_normalized = normalization_info['is_normalized']
+        if is_normalized:
+            print(f"处理归一化数据，缩放因子: {normalization_info['scale_factor']}")
+            print(f"原始质心位置: {normalization_info['original_centroid']}")
         
-        # 传入模型进行预测，确保提供所有所需参数
-        print("开始调用模型...")
-        print(f"输入维度检查: source={source.shape}, target={target.shape}")
+        # 使用模型预测变换
         rotation_pred, translation_pred, _, _, _, _ = net(source, target, grid_shape, x_origin, y_origin, z_origin, x_voxel, nstart)
         
         # 转换为numpy数组
         rotation_pred_np = rotation_pred.cpu().numpy()[0]
         translation_pred_np = translation_pred.cpu().numpy()[0]
         
+        # 如果点云是归一化的，需要还原平移向量（旋转矩阵保持不变）
+        if is_normalized:
+            scale_factor = normalization_info['scale_factor']
+            # 对于归一化数据，平移向量需要乘以缩放因子来还原到原始坐标系
+            translation_pred_np = translation_pred_np * scale_factor
+            print(f"已将平移向量从归一化空间还原到原始坐标系，乘以缩放因子: {scale_factor}")
+        
         print("预测的旋转矩阵:")
         print(rotation_pred_np)
         print("预测的平移向量:")
         print(translation_pred_np)
         
-    return rotation_pred_np, translation_pred_np
+    return rotation_pred_np, translation_pred_np, normalization_info
 
 def save_as_cif(coordinates, atom_types, atom_labels, original_cif, atom_lines, output_path):
     """将点云坐标保存为CIF格式"""
@@ -320,40 +386,69 @@ def save_results_as_cif(dataset, source_points, target_points, predicted_points,
     
     return source_cif_path, target_cif_path, predicted_cif_path
 
-def apply_transformation(source_points, rotation, translation):
-    """将预测的变换应用到源点云"""
-    # 转换为PyTorch张量
-    if isinstance(source_points, torch.Tensor):
-        source_tensor = source_points
+def apply_transformation(source_points, rotation, translation, normalization_info=None):
+    """将预测的变换应用到源点云
+    
+    参数:
+        source_points: 源点云坐标，形状为[3, N]或[N, 3]
+        rotation: 旋转矩阵，形状为[3, 3]
+        translation: 平移向量，形状为[3]
+        normalization_info: 归一化信息字典，包含is_normalized、scale_factor和original_centroid
+        
+    返回:
+        transformed_points: 变换后的点云，与输入格式相同
+    """
+    # 检查输入是否是张量
+    if not isinstance(source_points, torch.Tensor):
+        source_points = torch.tensor(source_points, dtype=torch.float32)
+    if not isinstance(rotation, torch.Tensor):
+        rotation = torch.tensor(rotation, dtype=torch.float32)
+    if not isinstance(translation, torch.Tensor):
+        translation = torch.tensor(translation, dtype=torch.float32)
+        
+    # 记录原始点云的形状
+    is_transposed = False
+    original_shape = source_points.shape
+    
+    # 确保点云形状为[3, N]
+    if source_points.shape[0] != 3 and source_points.shape[1] == 3:
+        source_points = source_points.transpose(0, 1)
+        is_transposed = True
+        
+    # 获取点数
+    num_points = source_points.shape[1]
+    
+    # 注意：如果normalization_info不为None且is_normalized为True，
+    # 则translation已经在predict_transformation函数中被还原到原始坐标系，
+    # 所以这里不需要再次还原
+    
+    # 应用旋转变换
+    transformed_points = rotation @ source_points
+    
+    # 应用平移变换（广播平移向量到每个点）
+    if len(translation.shape) == 1:
+        # 如果是1D向量[3]，扩展为[3, 1]然后广播
+        transformed_points = transformed_points + translation.reshape(3, 1)
     else:
-        source_tensor = torch.tensor(source_points, dtype=torch.float32)
+        # 如果已经是[3, 1]或其他形状
+        transformed_points = transformed_points + translation
     
-    # 确保点云格式正确 [B, 3, N]
-    if source_tensor.dim() == 2:
-        if source_tensor.shape[0] == 3:
-            source_tensor = source_tensor.unsqueeze(0)  # [1, 3, N]
-        else:
-            source_tensor = source_tensor.transpose(0, 1).unsqueeze(0)  # [1, 3, N]
+    # 如果是归一化数据，考虑还原到原始坐标系
+    if normalization_info and normalization_info.get('is_normalized', False):
+        original_centroid = normalization_info['original_centroid']
+        # 不需要再乘以scale_factor，因为rotation和translation已经被还原
+        # 只需要加回原始质心
+        if isinstance(original_centroid, np.ndarray):
+            original_centroid = torch.tensor(original_centroid, dtype=torch.float32)
+        # 将原始质心添加回所有点
+        transformed_points = transformed_points + original_centroid.reshape(3, 1)
+        print(f"已将变换后的点云还原到原始坐标系，添加原始质心: {original_centroid}")
     
-    rotation_tensor = torch.tensor(rotation, dtype=torch.float32).unsqueeze(0)  # [1, 3, 3]
-    translation_tensor = torch.tensor(translation, dtype=torch.float32).unsqueeze(0)  # [1, 3]
-    
-    # 应用变换
-    transformed_tensor = transform_point_cloud(source_tensor, rotation_tensor, translation_tensor)
-    
-    # 返回与输入格式相同的格式
-    if isinstance(source_points, torch.Tensor):
-        if source_points.dim() == 2:
-            if source_points.shape[0] == 3:
-                return transformed_tensor.squeeze(0)  # [3, N]
-            else:
-                return transformed_tensor.squeeze(0).transpose(0, 1)  # [N, 3]
-        return transformed_tensor
-    else:
-        if source_points.shape[0] == 3:
-            return transformed_tensor.squeeze(0).cpu().numpy()  # [3, N]
-        else:
-            return transformed_tensor.squeeze(0).transpose(0, 1).cpu().numpy()  # [N, 3]
+    # 如果输入是转置的，则转回原始形状
+    if is_transposed:
+        transformed_points = transformed_points.transpose(0, 1)
+        
+    return transformed_points
 
 def visualize_point_clouds(source, target=None, predicted=None, title="点云可视化"):
     """可视化点云"""
@@ -490,7 +585,7 @@ def batch_predict(dir_path, args, cmd_args):
             
             # 预测变换矩阵
             textio.cprint("开始预测变换...")
-            rotation_pred, translation_pred = predict_transformation(args, net, dataset)
+            rotation_pred, translation_pred, normalization_info = predict_transformation(args, net, dataset)
             
             # 打印预测结果
             textio.cprint("\n预测的旋转矩阵:")
@@ -503,7 +598,7 @@ def batch_predict(dir_path, args, cmd_args):
             target_points = dataset.target.clone()
             
             # 应用变换到源点云
-            transformed_points = apply_transformation(source_points, rotation_pred, translation_pred)
+            transformed_points = apply_transformation(source_points, rotation_pred, translation_pred, normalization_info)
             textio.cprint(f"已应用变换到源点云")
             
             # 保存为CIF文件
@@ -659,7 +754,7 @@ def main():
         
         # 预测变换矩阵
         textio.cprint("开始预测变换...")
-        rotation_pred, translation_pred = predict_transformation(args, net, dataset)
+        rotation_pred, translation_pred, normalization_info = predict_transformation(args, net, dataset)
         
         # 打印预测结果
         textio.cprint("\n预测的旋转矩阵:")
@@ -672,7 +767,7 @@ def main():
         target_points = dataset.target.clone()
         
         # 应用变换到源点云
-        transformed_points = apply_transformation(source_points, rotation_pred, translation_pred)
+        transformed_points = apply_transformation(source_points, rotation_pred, translation_pred, normalization_info)
         textio.cprint(f"已应用变换到源点云")
         
         # 保存为CIF文件

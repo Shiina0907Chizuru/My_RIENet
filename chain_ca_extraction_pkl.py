@@ -541,7 +541,7 @@ def process_protein_folder(protein_folder, ca_output_dir, pkl_output_dir, csv_wr
             transformed_target_cif = transformed_target.T if transformed_target.shape[0] == 3 else transformed_target
             
             # 保存变换后的目标点云为CIF
-            target_transformed_cif = os.path.join(transform_protein_dir, f"{protein_name}_target_transformed.cif")
+            target_transformed_cif = os.path.join(transform_protein_dir, f"{protein_name}_{chain_id}_target_transformed.cif")
             save_as_cif(
                 transformed_target_cif,
                 main_atom_types,
