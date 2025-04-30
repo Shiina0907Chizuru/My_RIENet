@@ -61,13 +61,12 @@ def parse_cif(cif_path, normalize=False):
     # 转换为numpy数组
     point_cloud = np.array(atoms, dtype=np.float32)
     
-    if normalize:
-        print("正在归一化点云...")
-        point_cloud, scale_factor, original_centroid = normalize_point_cloud(point_cloud)
-        print(f"归一化因子: {scale_factor}")
-        print(f"原始质心: {original_centroid}")
+    # 注意：在这里不进行归一化，而是返回原始点云
+    # 归一化将在process_single_file函数中进行
+    scale_factor = None
+    original_centroid = None
     
-    return point_cloud, atom_types, atom_labels, cif_content, atom_lines
+    return point_cloud, atom_types, atom_labels, cif_content, atom_lines, scale_factor, original_centroid
 
 def random_rotation_matrix():
     """生成随机旋转矩阵"""
@@ -473,8 +472,8 @@ def process_single_file(cif_path, output_dir, visualize=False, rotation_only=Fal
     print(f"处理文件: {cif_path}")
     print(f"只旋转不平移: {rotation_only}")
     
-    # 解析CIF文件
-    point_cloud, atom_types, atom_labels, cif_content, atom_lines = parse_cif(cif_path, normalize)
+    # 解析CIF文件 - 现在返回更多参数
+    point_cloud, atom_types, atom_labels, cif_content, atom_lines, _, _ = parse_cif(cif_path)
     
     # 保证输出目录存在
     os.makedirs(output_dir, exist_ok=True)
@@ -485,14 +484,17 @@ def process_single_file(cif_path, output_dir, visualize=False, rotation_only=Fal
     output_pkl = os.path.join(output_dir, base_name + "_train.pkl")
     output_centroid_pkl = os.path.join(output_dir, base_name + "_train_c.pkl")
     
-    # 归一化点云
+    # 归一化点云 - 只在这里进行一次归一化
     if not normalize:
         normalized_point_cloud = point_cloud
+        scale_factor = 1.0
+        centroid = np.zeros(3, dtype=np.float32)
     else:
+        print("正在归一化点云...")
         normalized_point_cloud, scale_factor, centroid = normalize_point_cloud(point_cloud)
         print(f"归一化后点云形状: {normalized_point_cloud.shape}")
         print(f"归一化因子: {scale_factor}")
-        print(f"质心: {centroid}")
+        print(f"原始质心: {centroid}")
     
     # 生成随机旋转矩阵和平移向量
     rotation_matrix = random_rotation_matrix()

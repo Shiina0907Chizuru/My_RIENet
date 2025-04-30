@@ -420,7 +420,7 @@ def apply_transformation(source_points, rotation, translation, normalization_inf
     
     # 注意：如果normalization_info不为None且is_normalized为True，
     # 则translation已经在predict_transformation函数中被还原到原始坐标系，
-    # 所以这里不需要再次还原
+    # 所以这里不需要再次还原平移向量
     
     # 应用旋转变换
     transformed_points = rotation @ source_points
@@ -435,20 +435,92 @@ def apply_transformation(source_points, rotation, translation, normalization_inf
     
     # 如果是归一化数据，考虑还原到原始坐标系
     if normalization_info and normalization_info.get('is_normalized', False):
+        scale_factor = normalization_info['scale_factor']
         original_centroid = normalization_info['original_centroid']
-        # 不需要再乘以scale_factor，因为rotation和translation已经被还原
-        # 只需要加回原始质心
+        
         if isinstance(original_centroid, np.ndarray):
             original_centroid = torch.tensor(original_centroid, dtype=torch.float32)
-        # 将原始质心添加回所有点
+        
+        # 1. 首先乘以缩放因子还原点云尺寸
+        transformed_points = transformed_points * scale_factor
+        # 2. 然后加回原始质心
         transformed_points = transformed_points + original_centroid.reshape(3, 1)
-        print(f"已将变换后的点云还原到原始坐标系，添加原始质心: {original_centroid}")
+        
+        print(f"已将变换后的点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
     
     # 如果输入是转置的，则转回原始形状
     if is_transposed:
         transformed_points = transformed_points.transpose(0, 1)
         
     return transformed_points
+
+def save_cif_files(source_points, target_points, transformed_points, output_base_path, normalization_info=None):
+    """保存源点云、目标点云和变换后的点云为CIF文件"""
+    
+    # 检查是否是张量，如果是，转换为numpy数组
+    if isinstance(source_points, torch.Tensor):
+        source_points = source_points.cpu().detach().numpy()
+    if isinstance(target_points, torch.Tensor):
+        target_points = target_points.cpu().detach().numpy()
+    if isinstance(transformed_points, torch.Tensor):
+        transformed_points = transformed_points.cpu().detach().numpy()
+    
+    # 创建目录
+    output_dir = os.path.dirname(output_base_path)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 获取文件名（不含扩展名和路径）
+    base_name = os.path.basename(output_base_path)
+    if base_name.endswith('.cif'):
+        base_name = base_name[:-4]
+    
+    # 如果是归一化数据，还原所有点云到原始坐标系
+    if normalization_info and normalization_info.get('is_normalized', False):
+        scale_factor = normalization_info['scale_factor']
+        original_centroid = normalization_info['original_centroid']
+        
+        # 确保original_centroid是numpy数组
+        if not isinstance(original_centroid, np.ndarray):
+            original_centroid = np.array(original_centroid)
+        
+        # 检查点云格式并确保是[N, 3]格式用于保存
+        if source_points.shape[0] == 3 and source_points.shape[1] != 3:
+            source_points = source_points.T
+        if target_points.shape[0] == 3 and target_points.shape[1] != 3:
+            target_points = target_points.T
+        if transformed_points.shape[0] == 3 and transformed_points.shape[1] != 3:
+            transformed_points = transformed_points.T
+        
+        # 还原源点云
+        source_points = source_points * scale_factor + original_centroid
+        print(f"已将源点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+        
+        # 还原目标点云
+        target_points = target_points * scale_factor + original_centroid
+        print(f"已将目标点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+        
+        # 注意：变换后的点云已经在apply_transformation函数中被还原
+    else:
+        # 确保点云是[N, 3]格式用于保存
+        if source_points.shape[0] == 3 and source_points.shape[1] != 3:
+            source_points = source_points.T
+        if target_points.shape[0] == 3 and target_points.shape[1] != 3:
+            target_points = target_points.T
+        if transformed_points.shape[0] == 3 and transformed_points.shape[1] != 3:
+            transformed_points = transformed_points.T
+    
+    # 保存为CIF文件
+    source_cif_path = os.path.join(output_dir, f"{base_name}_source.cif")
+    target_cif_path = os.path.join(output_dir, f"{base_name}_target.cif")
+    predicted_cif_path = os.path.join(output_dir, f"{base_name}_predicted.cif")
+    
+    save_as_cif_direct(source_points, source_cif_path)
+    save_as_cif_direct(target_points, target_cif_path)
+    save_as_cif_direct(transformed_points, predicted_cif_path)
+    
+    print(f"已保存源点云为CIF格式: {source_cif_path}")
+    print(f"已保存目标点云为CIF格式: {target_cif_path}")
+    print(f"已保存预测点云为CIF格式: {predicted_cif_path}")
 
 def visualize_point_clouds(source, target=None, predicted=None, title="点云可视化"):
     """可视化点云"""
@@ -600,6 +672,41 @@ def batch_predict(dir_path, args, cmd_args):
             # 应用变换到源点云
             transformed_points = apply_transformation(source_points, rotation_pred, translation_pred, normalization_info)
             textio.cprint(f"已应用变换到源点云")
+            
+            # 如果是归一化数据，先将源点云和目标点云还原到原始坐标系
+            if normalization_info and normalization_info.get('is_normalized', False):
+                scale_factor = normalization_info['scale_factor']
+                original_centroid = normalization_info['original_centroid']
+                
+                # 确保数据格式正确
+                source_is_transposed = False
+                target_is_transposed = False
+                
+                if source_points.shape[0] != 3 and source_points.shape[1] == 3:
+                    source_points = source_points.transpose(0, 1)
+                    source_is_transposed = True
+                    
+                if target_points.shape[0] != 3 and target_points.shape[1] == 3:
+                    target_points = target_points.transpose(0, 1)
+                    target_is_transposed = True
+                
+                # 将original_centroid转换为张量（如果是numpy数组）
+                if isinstance(original_centroid, np.ndarray):
+                    original_centroid = torch.tensor(original_centroid, dtype=torch.float32)
+                
+                # 还原源点云
+                source_points = source_points * scale_factor + original_centroid.reshape(3, 1)
+                textio.cprint(f"已将源点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+                
+                # 还原目标点云
+                target_points = target_points * scale_factor + original_centroid.reshape(3, 1)
+                textio.cprint(f"已将目标点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+                
+                # 转回原始形状（如果有转置）
+                if source_is_transposed:
+                    source_points = source_points.transpose(0, 1)
+                if target_is_transposed:
+                    target_points = target_points.transpose(0, 1)
             
             # 保存为CIF文件
             textio.cprint("正在生成CIF格式结果文件...")
@@ -769,6 +876,41 @@ def main():
         # 应用变换到源点云
         transformed_points = apply_transformation(source_points, rotation_pred, translation_pred, normalization_info)
         textio.cprint(f"已应用变换到源点云")
+        
+        # 如果是归一化数据，先将源点云和目标点云还原到原始坐标系
+        if normalization_info and normalization_info.get('is_normalized', False):
+            scale_factor = normalization_info['scale_factor']
+            original_centroid = normalization_info['original_centroid']
+            
+            # 确保数据格式正确
+            source_is_transposed = False
+            target_is_transposed = False
+            
+            if source_points.shape[0] != 3 and source_points.shape[1] == 3:
+                source_points = source_points.transpose(0, 1)
+                source_is_transposed = True
+                
+            if target_points.shape[0] != 3 and target_points.shape[1] == 3:
+                target_points = target_points.transpose(0, 1)
+                target_is_transposed = True
+            
+            # 将original_centroid转换为张量（如果是numpy数组）
+            if isinstance(original_centroid, np.ndarray):
+                original_centroid = torch.tensor(original_centroid, dtype=torch.float32)
+            
+            # 还原源点云
+            source_points = source_points * scale_factor + original_centroid.reshape(3, 1)
+            textio.cprint(f"已将源点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+            
+            # 还原目标点云
+            target_points = target_points * scale_factor + original_centroid.reshape(3, 1)
+            textio.cprint(f"已将目标点云还原到原始坐标系，使用缩放因子: {scale_factor}，添加原始质心: {original_centroid}")
+            
+            # 转回原始形状（如果有转置）
+            if source_is_transposed:
+                source_points = source_points.transpose(0, 1)
+            if target_is_transposed:
+                target_points = target_points.transpose(0, 1)
         
         # 保存为CIF文件
         textio.cprint("正在生成CIF格式结果文件...")
