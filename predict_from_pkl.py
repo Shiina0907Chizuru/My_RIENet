@@ -10,6 +10,8 @@ import torch.nn.functional as F
 import numpy as np
 import time
 import pickle
+import csv
+import math
 from model import RIENET
 from util import transform_point_cloud
 import matplotlib.pyplot as plt
@@ -28,6 +30,119 @@ class IOStream:
 
     def close(self):
         self.f.close()
+
+
+def relative_rotation_error(gt_rotation, pred_rotation):
+    """计算相对旋转误差(RRE)，单位为度"""
+    if isinstance(gt_rotation, np.ndarray):
+        gt_rotation = torch.from_numpy(gt_rotation).float()
+    if isinstance(pred_rotation, np.ndarray):
+        pred_rotation = torch.from_numpy(pred_rotation).float()
+        
+    # 计算旋转误差
+    mat = torch.matmul(pred_rotation.transpose(-1, -2), gt_rotation)
+    trace = mat[..., 0, 0] + mat[..., 1, 1] + mat[..., 2, 2]
+    
+    # 防止数值误差导致超出[-1, 1]范围
+    cos_theta = (trace - 1.0) * 0.5
+    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+    
+    # 计算角度并转换为度
+    theta = torch.acos(cos_theta)
+    rre = theta * 180.0 / math.pi
+    
+    return rre.item()
+
+def relative_translation_error(gt_translation, pred_translation):
+    """计算相对平移误差(RTE)，单位与输入相同"""
+    if isinstance(gt_translation, np.ndarray):
+        gt_translation = torch.from_numpy(gt_translation).float()
+    if isinstance(pred_translation, np.ndarray):
+        pred_translation = torch.from_numpy(pred_translation).float()
+        
+    # 计算欧氏距离
+    return torch.norm(gt_translation - pred_translation).item()
+
+def compute_rmse(source_points, gt_points, pred_points):
+    """计算均方根误差(RMSE)，单位与输入相同"""
+    if isinstance(source_points, torch.Tensor):
+        source_points = source_points.detach().cpu().numpy()
+    if isinstance(gt_points, torch.Tensor):
+        gt_points = gt_points.detach().cpu().numpy()
+    if isinstance(pred_points, torch.Tensor):
+        pred_points = pred_points.detach().cpu().numpy()
+        
+    # 确保形状一致 (N, 3)
+    if source_points.shape[0] == 3 and source_points.shape[1] != 3:
+        source_points = source_points.T
+    if gt_points.shape[0] == 3 and gt_points.shape[1] != 3:
+        gt_points = gt_points.T
+    if pred_points.shape[0] == 3 and pred_points.shape[1] != 3:
+        pred_points = pred_points.T
+        
+    # 计算均方根误差
+    squared_diff = np.sum((pred_points - gt_points) ** 2, axis=1)
+    rmse = np.sqrt(np.mean(squared_diff))
+    
+    return rmse
+
+def registration_recall(rmse, threshold=0.2):
+    """计算配准召回率(RR)，即RMSE小于阈值的比例"""
+    return 1.0 if rmse < threshold else 0.0
+
+def evaluate_registration(source_points, target_points, transformed_points, 
+                         gt_rotation=None, gt_translation=None, pred_rotation=None, 
+                         pred_translation=None, threshold=0.2, normalization_info=None):
+    """
+    评估点云配准结果
+    
+    参数:
+        source_points: 源点云
+        target_points: 目标点云（通常作为参考）
+        transformed_points: 经过变换后的源点云
+        gt_rotation: 真实旋转矩阵，如果有
+        gt_translation: 真实平移向量，如果有
+        pred_rotation: 预测的旋转矩阵
+        pred_translation: 预测的平移向量
+        threshold: 配准召回率的阈值，默认0.2
+        normalization_info: 归一化信息，用于确保比较相同坐标系下的平移向量
+        
+    返回:
+        results: 包含评估指标的字典
+    """
+    results = {}
+    
+    # 计算RMSE
+    rmse = compute_rmse(source_points, target_points, transformed_points)
+    results['rmse'] = rmse
+    
+    # 计算配准召回率
+    rr = registration_recall(rmse, threshold)
+    results['recall'] = rr
+    
+    # 如果有真实变换，计算RRE和RTE
+    if gt_rotation is not None and gt_translation is not None and pred_rotation is not None and pred_translation is not None:
+        # 由于模型直接输出原始坐标系的平移向量，无需对gt_translation进行缩放
+        gt_translation_for_comparison = gt_translation.copy() if isinstance(gt_translation, np.ndarray) else gt_translation.clone()
+        
+        # 这里不再对gt_translation乘以缩放因子，因为模型已经直接输出原始坐标系的平移向量
+        if normalization_info and normalization_info.get('is_normalized', False):
+            print(f"原始真实平移向量(归一化空间): {gt_translation}")
+            # 原始平移向量(归一化空间) × 缩放因子 = 真实平移向量(原始空间)
+            scale_factor = normalization_info['scale_factor']
+            original_translation = gt_translation * scale_factor
+            print(f"还原后真实平移向量: {original_translation}")
+        
+        # 现在两个平移向量都在相同的坐标系中进行比较
+        rre = relative_rotation_error(gt_rotation, pred_rotation)
+        rte = relative_translation_error(gt_translation_for_comparison, pred_translation)
+        results['rre'] = rre
+        results['rte'] = rte
+    else:
+        results['rre'] = None
+        results['rte'] = None
+        
+    return results
 
 def parse_cif(cif_path):
     """解析CIF文件，提取原子坐标和完整CIF内容"""
@@ -117,57 +232,87 @@ class PredictionDataset:
         else:
             self.translation = None
             
-        # 提取网格信息
-        if 'grid_shape' in data:
-            self.grid_shape = data['grid_shape']
-        else:
-            # 默认网格形状
-            self.grid_shape = np.array([32, 32, 32], dtype=np.int32)
-            
-        if 'x_origin' in data:
-            self.x_origin = data['x_origin']
-        else:
-            self.x_origin = -1.0
-            
-        if 'y_origin' in data:
-            self.y_origin = data['y_origin']
-        else:
-            self.y_origin = -1.0
-            
-        if 'z_origin' in data:
-            self.z_origin = data['z_origin']
-        else:
-            self.z_origin = -1.0
-            
-        if 'x_voxel' in data:
-            self.x_voxel = data['x_voxel']
-        else:
-            self.x_voxel = 2.0 / self.grid_shape[0]
-            
-        if 'nstart' in data:
-            self.nstart = data['nstart']
-        else:
-            self.nstart = np.array([0], dtype=np.int32)
-            
-        # 检查是否有归一化信息
-        self.is_normalized = False
-        self.scale_factor = 1.0
-        self.original_centroid = np.zeros(3, dtype=np.float32)
-        
-        # 检查grid_info中是否包含normalized键（新格式）
-        if 'grid_info' in data and isinstance(data['grid_info'], dict):
+        # 提取网格信息 - 优先从grid_info中获取，这是cif_to_point_cloud.py中使用的格式
+        if 'grid_info' in data:
             grid_info = data['grid_info']
-            if 'normalized' in grid_info and grid_info['normalized']:
-                self.is_normalized = True
-                self.scale_factor = float(grid_info['scale_factor'])
-                self.original_centroid = np.array(grid_info['original_centroid'], dtype=np.float32)
-                print(f"检测到归一化数据, 缩放因子: {self.scale_factor}, 原始质心: {self.original_centroid}")
-        # 直接检查顶层字典是否包含normalized键（旧格式）
-        elif 'normalized' in data and data['normalized']:
-            self.is_normalized = True
-            self.scale_factor = float(data['scale_factor'])
-            self.original_centroid = np.array(data['original_centroid'], dtype=np.float32)
-            print(f"检测到归一化数据(旧格式), 缩放因子: {self.scale_factor}, 原始质心: {self.original_centroid}")
+            
+            # 从grid_info中提取网格信息
+            if 'grid_shape' in grid_info:
+                self.grid_shape = grid_info['grid_shape']
+            else:
+                self.grid_shape = np.array([32, 32, 32], dtype=np.int32)
+                
+            if 'x_origin' in grid_info:
+                self.x_origin = grid_info['x_origin']
+            else:
+                self.x_origin = np.array([0.0], dtype=np.float32)
+                
+            if 'y_origin' in grid_info:
+                self.y_origin = grid_info['y_origin']
+            else:
+                self.y_origin = np.array([0.0], dtype=np.float32)
+                
+            if 'z_origin' in grid_info:
+                self.z_origin = grid_info['z_origin']
+            else:
+                self.z_origin = np.array([0.0], dtype=np.float32)
+                
+            if 'x_voxel' in grid_info:
+                self.x_voxel = grid_info['x_voxel']
+            else:
+                self.x_voxel = np.array([0.05], dtype=np.float32)
+                
+            # 检查归一化信息
+            self.is_normalized = grid_info.get('normalized', False)
+            self.scale_factor = grid_info.get('scale_factor', 1.0)
+            self.original_centroid = grid_info.get('original_centroid', np.zeros(3, dtype=np.float32))
+            
+            # nstart默认为0
+            self.nstart = 0
+        else:
+            # 如果没有grid_info，则直接检查顶级键
+            if 'grid_shape' in data:
+                self.grid_shape = data['grid_shape']
+            else:
+                self.grid_shape = np.array([32, 32, 32], dtype=np.int32)
+                
+            if 'x_origin' in data:
+                self.x_origin = data['x_origin']
+            else:
+                self.x_origin = -1.0
+                
+            if 'y_origin' in data:
+                self.y_origin = data['y_origin']
+            else:
+                self.y_origin = -1.0
+                
+            if 'z_origin' in data:
+                self.z_origin = data['z_origin']
+            else:
+                self.z_origin = -1.0
+                
+            if 'x_voxel' in data:
+                self.x_voxel = data['x_voxel']
+            else:
+                self.x_voxel = 2.0 / self.grid_shape[0]
+                
+            if 'nstart' in data:
+                self.nstart = data['nstart']
+            else:
+                self.nstart = 0
+            
+            # 检查归一化信息
+            self.is_normalized = data.get('normalized', False)
+            self.scale_factor = data.get('scale_factor', 1.0)
+            self.original_centroid = data.get('original_centroid', np.zeros(3, dtype=np.float32))
+        
+        # 确保original_centroid是numpy数组
+        if isinstance(self.original_centroid, list):
+            self.original_centroid = np.array(self.original_centroid, dtype=np.float32)
+            
+        # 打印归一化信息
+        if self.is_normalized:
+            print(f"检测到归一化数据, 缩放因子: {self.scale_factor}, 原始质心: {self.original_centroid}")
         
         # 确保点云形状正确（[3, N]格式）
         if self.source.shape[0] != 3 and self.source.shape[1] == 3:
@@ -209,7 +354,7 @@ class PredictionDataset:
         return self.source, self.target, self.grid_shape, self.x_origin, self.y_origin, self.z_origin, self.x_voxel, self.nstart, normalization_info
 
 def predict_transformation(args, net, dataset):
-    """使用模型预测变换，不计算与真实值的loss"""
+    """使用模型预测变换，并计算评估指标"""
     net.eval()
     
     with torch.no_grad():
@@ -239,19 +384,95 @@ def predict_transformation(args, net, dataset):
         rotation_pred_np = rotation_pred.cpu().numpy()[0]
         translation_pred_np = translation_pred.cpu().numpy()[0]
         
-        # 如果点云是归一化的，需要还原平移向量（旋转矩阵保持不变）
+        # 先保存原始预测的平移向量（归一化空间中的）
+        translation_pred_normalized = translation_pred_np.copy()
+        
+        # 在归一化空间中应用变换
+        source_cpu = source.cpu().squeeze(0)  # 移除批次维度
+        target_cpu = target.cpu().squeeze(0)
+        
+        # 在归一化空间中应用变换，不做还原
+        transformed_points_normalized = apply_transformation_in_normalized_space(
+            source_cpu.clone(), 
+            rotation_pred_np, 
+            translation_pred_normalized
+        )
+        
+        # 如果是归一化数据，将预测的平移向量和点云还原到原始坐标系
         if is_normalized:
             scale_factor = normalization_info['scale_factor']
-            # 对于归一化数据，平移向量需要乘以缩放因子来还原到原始坐标系
-            translation_pred_np = translation_pred_np * scale_factor
-            print(f"已将平移向量从归一化空间还原到原始坐标系，乘以缩放因子: {scale_factor}")
+            original_centroid = normalization_info['original_centroid']
+            
+            # # 对于归一化数据，平移向量需要乘以缩放因子来还原到原始坐标系
+            # translation_pred_np = translation_pred_normalized * scale_factor
+            # print(f"已将平移向量从归一化空间还原到原始坐标系，乘以缩放因子: {scale_factor}")
+            
+            # 将归一化空间中的变换后点云还原到原始坐标系
+            if isinstance(transformed_points_normalized, torch.Tensor):
+                transformed_points_normalized = transformed_points_normalized.cpu().numpy()
+            
+            # 确保点云形状正确用于还原
+            if transformed_points_normalized.shape[0] == 3 and transformed_points_normalized.shape[1] != 3:
+                transformed_points_normalized = transformed_points_normalized.T
+            
+            # 如果有真实旋转矩阵，计算旋转误差但不影响还原过程
+            if hasattr(dataset, 'rotation'):
+                gt_rotation = dataset.rotation.numpy() if isinstance(dataset.rotation, torch.Tensor) else dataset.rotation
+                rre = relative_rotation_error(gt_rotation, rotation_pred_np)
+                print(f"计算得到的旋转误差(RRE): {rre:.4f}度")
+            
+            # 还原到原始坐标系 - 始终使用源点云的原始质心
+            transformed_points = transformed_points_normalized * scale_factor
+            
+            # 统一使用源点云的原始质心还原
+            if isinstance(transformed_points, np.ndarray):
+                transformed_points = transformed_points + original_centroid
+            else:
+                transformed_points = transformed_points + torch.tensor(original_centroid, dtype=torch.float32)
+                
+            print(f"已将变换后的点云还原到原始坐标系。使用源点云原始质心: {original_centroid}")
+        else:
+            # 如果不是归一化数据，使用原始变换结果
+            transformed_points = transformed_points_normalized
         
         print("预测的旋转矩阵:")
         print(rotation_pred_np)
         print("预测的平移向量:")
         print(translation_pred_np)
         
-    return rotation_pred_np, translation_pred_np, normalization_info
+        # 应用变换到源点云用于评估
+        source_cpu = source.cpu().squeeze(0)  # 移除批次维度
+        target_cpu = target.cpu().squeeze(0)
+        
+        # 获取真实变换（如果有）
+        gt_rotation = None
+        gt_translation = None
+        if hasattr(dataset, 'rotation') and hasattr(dataset, 'translation'):
+            gt_rotation = dataset.rotation.numpy() if isinstance(dataset.rotation, torch.Tensor) else dataset.rotation
+            gt_translation = dataset.translation.numpy() if isinstance(dataset.translation, torch.Tensor) else dataset.translation
+        
+        # 计算评估指标
+        evaluation_results = None
+        if gt_rotation is not None and gt_translation is not None:
+            evaluation_results = evaluate_registration(
+                source_cpu, 
+                target_cpu, 
+                transformed_points,
+                gt_rotation,
+                gt_translation,
+                rotation_pred_np,
+                translation_pred_np,
+                threshold=0.2,  # 可以从配置中读取该阈值
+                normalization_info=normalization_info  # 传递归一化信息
+            )
+            print("\n评估结果:")
+            if evaluation_results['rre'] is not None:
+                print(f"相对旋转误差 (RRE): {evaluation_results['rre']:.4f}度")
+                print(f"相对平移误差 (RTE): {evaluation_results['rte']:.4f}单位")
+            print(f"均方根误差 (RMSE): {evaluation_results['rmse']:.4f}单位")
+            print(f"配准召回率 (RR): {evaluation_results['recall']:.4f}")
+        
+    return rotation_pred_np, translation_pred_np, normalization_info, evaluation_results
 
 def save_as_cif(coordinates, atom_types, atom_labels, original_cif, atom_lines, output_path):
     """将点云坐标保存为CIF格式"""
@@ -276,6 +497,49 @@ def save_as_cif(coordinates, atom_types, atom_labels, original_cif, atom_lines, 
         f.writelines(new_cif)
     
     print(f"已保存CIF文件: {output_path}")
+
+def apply_transformation_in_normalized_space(source_points, rotation, translation):
+    """在归一化空间中应用变换，不进行坐标系还原
+    
+    参数:
+        source_points: 源点云坐标，形状为[3, N]或[N, 3]
+        rotation: 旋转矩阵，形状为[3, 3]
+        translation: 平移向量，形状为[3]
+        
+    返回:
+        transformed_points: 变换后的点云，与输入格式相同
+    """
+    # 检查输入是否是张量
+    if not isinstance(source_points, torch.Tensor):
+        source_points = torch.tensor(source_points, dtype=torch.float32)
+    if not isinstance(rotation, torch.Tensor):
+        rotation = torch.tensor(rotation, dtype=torch.float32)
+    if not isinstance(translation, torch.Tensor):
+        translation = torch.tensor(translation, dtype=torch.float32)
+        
+    # 记录原始点云的形状
+    is_transposed = False
+    original_shape = source_points.shape
+    
+    # 确保点云形状为[3, N]
+    if source_points.shape[0] != 3 and source_points.shape[1] == 3:
+        source_points = source_points.transpose(0, 1)
+        is_transposed = True
+    
+    # 应用旋转变换
+    transformed_points = rotation @ source_points
+    
+    # 应用平移变换
+    if len(translation.shape) == 1:
+        transformed_points = transformed_points + translation.reshape(3, 1)
+    else:
+        transformed_points = transformed_points + translation
+    
+    # 如果输入是转置的，则转回原始形状
+    if is_transposed:
+        transformed_points = transformed_points.transpose(0, 1)
+        
+    return transformed_points
 
 def save_as_cif_direct(coordinates, output_path, chain_id='A', residue_name='ALA', atom_name='CA'):
     """
@@ -418,9 +682,10 @@ def apply_transformation(source_points, rotation, translation, normalization_inf
     # 获取点数
     num_points = source_points.shape[1]
     
-    # 注意：如果normalization_info不为None且is_normalized为True，
-    # 则translation已经在predict_transformation函数中被还原到原始坐标系，
-    # 所以这里不需要再次还原平移向量
+    # 判断是否需要对点云进行归一化还原
+    # 在predict_transformation函数中，如果是归一化数据，平移向量已经乘以缩放因子还原了
+    need_denormalize = normalization_info and normalization_info.get('is_normalized', False)
+    translation_already_denormalized = need_denormalize  # 平移向量已经在predict_transformation中还原了
     
     # 应用旋转变换
     transformed_points = rotation @ source_points
@@ -433,15 +698,16 @@ def apply_transformation(source_points, rotation, translation, normalization_inf
         # 如果已经是[3, 1]或其他形状
         transformed_points = transformed_points + translation
     
-    # 如果是归一化数据，考虑还原到原始坐标系
-    if normalization_info and normalization_info.get('is_normalized', False):
+    # 如果是归一化数据，需要进行尺寸还原和质心添加
+    if need_denormalize:
         scale_factor = normalization_info['scale_factor']
         original_centroid = normalization_info['original_centroid']
         
         if isinstance(original_centroid, np.ndarray):
             original_centroid = torch.tensor(original_centroid, dtype=torch.float32)
         
-        # 1. 首先乘以缩放因子还原点云尺寸
+        # 无论平移向量是否已经还原，都执行相同的还原操作
+        # 1. 将旋转平移后的点云乘以缩放因子
         transformed_points = transformed_points * scale_factor
         # 2. 然后加回原始质心
         transformed_points = transformed_points + original_centroid.reshape(3, 1)
@@ -557,7 +823,7 @@ def parse_args_from_yaml(yaml_path):
     return EasyDict(config)
 
 def batch_predict(dir_path, args, cmd_args):
-    """批量处理目录中的所有PKL文件"""
+    """批量处理目录中的所有PKL文件，并生成评估结果CSV文件"""
     # 检查输入目录是否存在
     if not os.path.exists(dir_path):
         print(f"错误: 输入目录 {dir_path} 不存在")
@@ -570,6 +836,13 @@ def batch_predict(dir_path, args, cmd_args):
     # 创建总体日志文件
     batch_log_file = os.path.join(cmd_args.output_dir, 'batch_predict_log.txt')
     batch_textio = IOStream(batch_log_file)
+    
+    # 创建CSV结果文件
+    csv_file = os.path.join(cmd_args.output_dir, 'evaluation_results.csv')
+    csv_header = ['文件名', 'RRE (度)', 'RTE', 'RMSE', '配准召回率', '是否成功']
+    with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(csv_header)
     
     # 查找所有PKL文件
     pkl_files = [f for f in os.listdir(dir_path) if f.endswith('.pkl')]
@@ -635,6 +908,9 @@ def batch_predict(dir_path, args, cmd_args):
     success_count = 0
     failed_files = []
     
+    # 评估结果统计
+    all_results = []
+    
     # 批量处理每个PKL文件
     for i, pkl_file in enumerate(pkl_files):
         batch_textio.cprint(f"\n[{i+1}/{len(pkl_files)}] 处理文件: {pkl_file}")
@@ -655,9 +931,9 @@ def batch_predict(dir_path, args, cmd_args):
             dataset = PredictionDataset(pkl_path)
             textio.cprint(f"已加载PKL文件: {pkl_path}")
             
-            # 预测变换矩阵
+            # 预测变换矩阵并评估结果
             textio.cprint("开始预测变换...")
-            rotation_pred, translation_pred, normalization_info = predict_transformation(args, net, dataset)
+            rotation_pred, translation_pred, normalization_info, evaluation_results = predict_transformation(args, net, dataset)
             
             # 打印预测结果
             textio.cprint("\n预测的旋转矩阵:")
@@ -672,6 +948,35 @@ def batch_predict(dir_path, args, cmd_args):
             # 应用变换到源点云
             transformed_points = apply_transformation(source_points, rotation_pred, translation_pred, normalization_info)
             textio.cprint(f"已应用变换到源点云")
+            
+            # 保存结果到CSV
+            result_row = [pkl_name]
+            if evaluation_results:
+                textio.cprint("\n评估结果:")
+                if evaluation_results['rre'] is not None:
+                    textio.cprint(f"相对旋转误差 (RRE): {evaluation_results['rre']:.4f}度")
+                    textio.cprint(f"相对平移误差 (RTE): {evaluation_results['rte']:.4f}单位")
+                    result_row.extend([f"{evaluation_results['rre']:.4f}", f"{evaluation_results['rte']:.4f}"])
+                else:
+                    textio.cprint("注意: 无法计算RRE和RTE，因为没有提供真实变换")
+                    result_row.extend(["N/A", "N/A"])
+                
+                textio.cprint(f"均方根误差 (RMSE): {evaluation_results['rmse']:.4f}单位")
+                textio.cprint(f"配准召回率 (RR): {evaluation_results['recall']:.4f}")
+                result_row.extend([f"{evaluation_results['rmse']:.4f}", f"{evaluation_results['recall']:.4f}"])
+                
+                # 保存结果用于统计
+                all_results.append(evaluation_results)
+            else:
+                result_row.extend(["N/A", "N/A", "N/A", "N/A"])
+            
+            # 保存成功标志
+            result_row.append("成功")
+            
+            # 写入CSV
+            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(result_row)
             
             # 如果是归一化数据，先将源点云和目标点云还原到原始坐标系
             if normalization_info and normalization_info.get('is_normalized', False):
@@ -747,12 +1052,80 @@ def batch_predict(dir_path, args, cmd_args):
             textio.cprint(traceback.format_exc())
             batch_textio.cprint(f"处理失败: {pkl_file}, 错误: {e}")
             failed_files.append(pkl_file)
+            
+            # 记录失败到CSV
+            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([pkl_name, "N/A", "N/A", "N/A", "N/A", "失败"])
         
         textio.close()
     
     # 输出批处理摘要
     batch_textio.cprint("\n\n批处理摘要:")
     batch_textio.cprint(f"总共处理 {len(pkl_files)} 个文件，成功: {success_count}，失败: {len(pkl_files) - success_count}")
+    
+    # 计算并保存统计结果
+    if all_results:
+        # 计算平均值和中位数
+        avg_results = {'rre': None, 'rte': None, 'rmse': 0.0, 'recall': 0.0}
+        med_results = {'rre': None, 'rte': None, 'rmse': 0.0, 'recall': 0.0}
+        
+        # 收集所有有效的测量结果
+        valid_rre = [r['rre'] for r in all_results if r['rre'] is not None]
+        valid_rte = [r['rte'] for r in all_results if r['rte'] is not None]
+        valid_rmse = [r['rmse'] for r in all_results]
+        valid_recall = [r['recall'] for r in all_results]
+        
+        # 计算平均值
+        if valid_rre:
+            avg_results['rre'] = sum(valid_rre) / len(valid_rre)
+            med_results['rre'] = sorted(valid_rre)[len(valid_rre) // 2]
+        
+        if valid_rte:
+            avg_results['rte'] = sum(valid_rte) / len(valid_rte)
+            med_results['rte'] = sorted(valid_rte)[len(valid_rte) // 2]
+        
+        avg_results['rmse'] = sum(valid_rmse) / len(valid_rmse)
+        avg_results['recall'] = sum(valid_recall) / len(valid_rmse)
+        
+        med_results['rmse'] = sorted(valid_rmse)[len(valid_rmse) // 2]
+        med_results['recall'] = sorted(valid_recall)[len(valid_recall) // 2]
+        
+        # 将统计结果写入CSV
+        with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([])  # 空行
+            writer.writerow(["\u5e73\u5747\u503c:"])
+            if avg_results['rre'] is not None:
+                writer.writerow(["", f"{avg_results['rre']:.4f}", f"{avg_results['rte']:.4f}", 
+                               f"{avg_results['rmse']:.4f}", f"{avg_results['recall']:.4f}", ""])
+            else:
+                writer.writerow(["", "N/A", "N/A", f"{avg_results['rmse']:.4f}", f"{avg_results['recall']:.4f}", ""])
+                
+            writer.writerow(["\u4e2d\u4f4d\u6570:"])
+            if med_results['rre'] is not None:
+                writer.writerow(["", f"{med_results['rre']:.4f}", f"{med_results['rte']:.4f}", 
+                               f"{med_results['rmse']:.4f}", f"{med_results['recall']:.4f}", ""])
+            else:
+                writer.writerow(["", "N/A", "N/A", f"{med_results['rmse']:.4f}", f"{med_results['recall']:.4f}", ""])
+        
+        # 输出到日志
+        batch_textio.cprint("\n\n评估结果统计:")
+        batch_textio.cprint("\n平均值:")
+        if avg_results['rre'] is not None:
+            batch_textio.cprint(f"相对旋转误差 (RRE): {avg_results['rre']:.4f}度")
+            batch_textio.cprint(f"相对平移误差 (RTE): {avg_results['rte']:.4f}单位")
+        batch_textio.cprint(f"均方根误差 (RMSE): {avg_results['rmse']:.4f}单位")
+        batch_textio.cprint(f"配准召回率 (RR): {avg_results['recall']:.4f}")
+        
+        batch_textio.cprint("\n中位数:")
+        if med_results['rre'] is not None:
+            batch_textio.cprint(f"相对旋转误差 (RRE): {med_results['rre']:.4f}度")
+            batch_textio.cprint(f"相对平移误差 (RTE): {med_results['rte']:.4f}单位")
+        batch_textio.cprint(f"均方根误差 (RMSE): {med_results['rmse']:.4f}单位")
+        batch_textio.cprint(f"配准召回率 (RR): {med_results['recall']:.4f}")
+        
+        batch_textio.cprint(f"\n统计结果已保存到: {csv_file}")
     
     if failed_files:
         batch_textio.cprint("\n失败的文件:")

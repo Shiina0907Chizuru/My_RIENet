@@ -1,0 +1,51 @@
+exp_name: ca_point_normalized_geo
+
+model: RIENET
+dataset: ca_point
+model_path: ''
+dim: 8 # 16 for unseen experiment / 8 for the same experiment
+#-----------------------ca_point-------------------------
+
+
+# ----------------model hyper parameters------------------
+nn_margin: 0.5
+loss_margin: 0.01
+list_k1: [9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9]
+list_k2: [9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9]
+emb_dims: 256
+n_iters: 3
+#n_iters:迭代次数
+n_points: 40
+n_subsampled_points: 768
+batch_size: 1
+test_batch_size: 1
+epochs: 1000
+use_sgd: False
+n_keypoints: 500
+lr: 0.001
+momentum: 0.9
+no_cuda: False
+seed: 1234
+start_epoch: 0
+lr_step: [100,300,500,700,900]
+
+# -------------geometric encoding parameters--------------
+geo_encoding:
+  enabled: True  # 设置为False可以禁用几何编码功能
+  hidden_dim: 64  # 几何编码的维度
+  sigma_d: 0.2    # 距离编码的温度参数
+  sigma_a: 15     # 角度编码的温度参数
+  angle_k: 3      # 角度计算的近邻数量
+  reduction_a: 'max'  # 角度特征的归约方式：'max'或'mean'
+
+# -------------feature fusion parameters----------------
+feature_fusion:
+  fusion_type: 'concat'  # 融合方式：'concat', 'add', 'attention'
+  output_dim: 256  # 融合后的特征维度，应与emb_dims一致
+
+# ------------------network training-----------------------
+resume: False
+
+
+# ------------------network testing------------------------
+eval: False # True for testing / False for training

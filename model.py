@@ -12,6 +12,14 @@ from chamfer_loss import *
 from utils import pairwise_distance_batch, PointNet, Pointer, get_knn_index, Discriminator, feature_extractor, \
     compute_rigid_transformation, get_keypoints
 
+# 导入几何编码相关模块
+try:
+    from geo_encoding import GeometricStructureEmbedding, FeatureFusionModule
+    has_geo_encoding = True
+except ImportError:
+    has_geo_encoding = False
+    print("警告: 几何编码模块未找到，将禁用几何编码功能")
+
 
 class SVDHead(nn.Module):
     def __init__(self, args):
@@ -424,6 +432,41 @@ class RIENET(nn.Module):
         self.list_k1 = args.list_k1
         self.list_k2 = args.list_k2
         #self.cc_loss = RSCC_Loss(grid_shape, x_origin, y_origin, z_origin, x_voxel, y_voxel, z_voxel,nstart)
+        
+        # 检查是否启用几何编码
+        self.use_geo_encoding = False
+        if hasattr(args, 'geo_encoding') and has_geo_encoding:
+            if isinstance(args.geo_encoding, dict):
+                self.use_geo_encoding = args.geo_encoding.get('enabled', False)
+            else:
+                self.use_geo_encoding = getattr(args.geo_encoding, 'enabled', False)
+                
+            if self.use_geo_encoding:
+                print("已启用几何编码功能")
+                # 创建几何编码模块
+                geo_params = args.geo_encoding
+                self.geo_embedding = GeometricStructureEmbedding(
+                    hidden_dim=geo_params.hidden_dim,
+                    sigma_d=geo_params.sigma_d,
+                    sigma_a=geo_params.sigma_a,
+                    angle_k=geo_params.angle_k,
+                    reduction_a=geo_params.reduction_a
+                )
+                
+                # 创建特征融合模块
+                fusion_params = args.feature_fusion
+                dgcnn_dim = args.emb_dims
+                geo_dim = geo_params.hidden_dim
+                output_dim = fusion_params.output_dim
+                self.fusion_module = FeatureFusionModule(
+                    dgcnn_dim=dgcnn_dim,
+                    geo_dim=geo_dim,
+                    output_dim=output_dim,
+                    fusion_type=fusion_params.fusion_type
+                )
+                print(f"初始化融合模块，类型: {fusion_params.fusion_type}")
+        else:
+            print("几何编码功能未启用或模块未找到")
 
     def forward(self, *input):
         """
@@ -471,6 +514,29 @@ class RIENET(nn.Module):
             tgt_embedding, _, tgt_knn, _ = self.emb_nn(tgt, self.list_k1[i])
             print(f"tgt_embedding维度: {tgt_embedding.shape}")
             print(f"tgt_knn维度: {tgt_knn.shape}")
+            
+            # 如果启用了几何编码，则融合几何特征
+            if self.use_geo_encoding:
+                print("使用几何编码特征")
+                # 获取几何特征
+                # 转换点云格式 [B,3,N] -> [B,N,3]
+                src_transposed = src.transpose(1, 2)  
+                tgt_transposed = tgt.transpose(1, 2)
+                
+                src_geo_embedding = self.geo_embedding(src_transposed)  # [B,N,C]
+                tgt_geo_embedding = self.geo_embedding(tgt_transposed)  # [B,N,C]
+                
+                # 转换几何特征格式以匹配DGCNN特征 [B,N,C] -> [B,C,N]
+                src_geo_embedding = src_geo_embedding.transpose(1, 2)  
+                tgt_geo_embedding = tgt_geo_embedding.transpose(1, 2)  
+                
+                print(f"几何特征维度: src={src_geo_embedding.shape}, tgt={tgt_geo_embedding.shape}")
+                
+                # 特征融合
+                src_embedding = self.fusion_module(src_embedding, src_geo_embedding)
+                tgt_embedding = self.fusion_module(tgt_embedding, tgt_geo_embedding)
+                
+                print(f"融合后特征维度: src={src_embedding.shape}, tgt={tgt_embedding.shape}")
 
             print(f"调用get_knn_index前维度: src={src.shape}, tgt={tgt.shape}")
             src_idx1, _ = get_knn_index(src, self.list_k2[i])  # 8个点？？？
