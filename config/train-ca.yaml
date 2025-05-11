@@ -1,4 +1,4 @@
-exp_name: ca_point_normalized
+exp_name: ca_point_mrcandpdb
 
 model: RIENET
 dataset: ca_point

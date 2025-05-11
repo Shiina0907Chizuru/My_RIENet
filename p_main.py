@@ -630,14 +630,14 @@ def main():
         train_loader = None
         if not args.eval:
             # train_path = "/xiangyux/point/RIENet-main/data/ca_map_train"
-            train_path = "/zhaoxuanj/Point_dataset/normalize_data/5000down_c_pkl"
+            train_path = "/zhaoxuanj/Point_dataset/mrc_pdb_pkl3000low_train"
             train_data = PointCloud_ca_Dataset(train_path)
             train_loader = DataLoader(train_data, args.batch_size, drop_last=True, shuffle=True)
             print("训练数据集已加载")
         
         # 测试数据集总是加载
         #test_path = "/xiangyux/point/RIENet-main/data/ca_test"
-        test_path = "/zhaoxuanj/Point_dataset/normalize_data/5000down_c_pkl"
+        test_path = "/zhaoxuanj/Point_dataset/mrc_pdb_pkl3000low_test"
         test_data = PointCloud_ca_Dataset(test_path)
         test_loader = DataLoader(test_data, args.batch_size, drop_last=False, shuffle=False)
         print("测试数据集已加载")
