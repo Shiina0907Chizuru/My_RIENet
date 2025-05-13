@@ -820,6 +820,7 @@ def batch_process(source_dir, target_dir, output_dir, visualize=False, normalize
         
         # 尝试不同的目标文件命名模式
         target_basename_patterns = [
+            f"{protein_id}_segment.cif",  # 如"8h1p_segment.cif"
             f"{protein_id}_mrc2cif.cif",  # 如"8h1p_mrc2cif.cif"
             f"{protein_id}.cif",          # 如"8h1p.cif"
             source_basename               # 相同的文件名

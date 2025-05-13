@@ -1,4 +1,4 @@
-exp_name: ca_point_mrcandpdb
+exp_name: ca_point_mrcandpdb_cryoalignsample
 
 model: RIENET
 dataset: ca_point
