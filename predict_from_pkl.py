@@ -33,25 +33,80 @@ class IOStream:
 
 
 def relative_rotation_error(gt_rotation, pred_rotation):
-    """计算相对旋转误差(RRE)，单位为度"""
+    """计算相对旋转误差(RRE)，单位为度
+    
+    RRE = acos((trace(R_gt^T · R_pred) - 1) / 2)
+    
+    参数:
+        gt_rotation: 真实旋转矩阵，形状为[3, 3]
+        pred_rotation: 预测的旋转矩阵，形状为[3, 3]
+        
+    返回:
+        rre: 相对旋转误差，单位为度
+    """
     if isinstance(gt_rotation, np.ndarray):
         gt_rotation = torch.from_numpy(gt_rotation).float()
     if isinstance(pred_rotation, np.ndarray):
         pred_rotation = torch.from_numpy(pred_rotation).float()
+    
+    # 打印详细的矩阵信息
+    print("\n============ 旋转矩阵详细信息 ============")
+    print("真实旋转矩阵 (gt_rotation):")
+    print(gt_rotation.numpy())
+    print("\n预测旋转矩阵 (pred_rotation):")
+    print(pred_rotation.numpy())
+    
+    # 检查旋转矩阵的性质
+    gt_det = torch.det(gt_rotation)
+    pred_det = torch.det(pred_rotation)
+    print(f"\n行列式检查 - gt_det: {gt_det.item():.6f}, pred_det: {pred_det.item():.6f}")
+    
+    # 检查是否为正交矩阵 (R·R^T = I)
+    gt_orthogonal = torch.matmul(gt_rotation, gt_rotation.transpose(-1, -2))
+    pred_orthogonal = torch.matmul(pred_rotation, pred_rotation.transpose(-1, -2))
+    print("\n正交性检查 (R·R^T 应接近单位矩阵):")
+    print("gt_rotation · gt_rotation^T:")
+    print(gt_orthogonal.numpy())
+    print("pred_rotation · pred_rotation^T:")
+    print(pred_orthogonal.numpy())
         
-    # 计算旋转误差
-    mat = torch.matmul(pred_rotation.transpose(-1, -2), gt_rotation)
-    trace = mat[..., 0, 0] + mat[..., 1, 1] + mat[..., 2, 2]
+    # 修正：根据GeoTransformer的标准实现
+    # 计算方式1: pred_rotation.T @ gt_rotation (当前实现)
+    print("\n============ RRE计算方式1: pred_rotation.T @ gt_rotation ============")
+    mat1 = torch.matmul(pred_rotation.transpose(-1, -2), gt_rotation)
+    trace1 = mat1[..., 0, 0] + mat1[..., 1, 1] + mat1[..., 2, 2]
+    print("乘积矩阵 (pred_rotation.T @ gt_rotation):")
+    print(mat1.numpy())
+    print(f"矩阵乘积的trace值: {trace1.item():.6f}")
     
     # 防止数值误差导致超出[-1, 1]范围
-    cos_theta = (trace - 1.0) * 0.5
-    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+    cos_theta1 = (trace1 - 1.0) * 0.5
+    cos_theta1 = torch.clamp(cos_theta1, -1.0, 1.0)
+    theta1 = torch.acos(cos_theta1)
+    rre1 = theta1 * 180.0 / math.pi
+    print(f"cos_theta值: {cos_theta1.item():.6f}")
+    print(f"得到的角度: {rre1.item():.6f}度")
     
-    # 计算角度并转换为度
-    theta = torch.acos(cos_theta)
-    rre = theta * 180.0 / math.pi
+    # 计算方式2: gt_rotation.T @ pred_rotation (替代方式)
+    print("\n============ RRE计算方式2: gt_rotation.T @ pred_rotation ============")
+    mat2 = torch.matmul(gt_rotation.transpose(-1, -2), pred_rotation)
+    trace2 = mat2[..., 0, 0] + mat2[..., 1, 1] + mat2[..., 2, 2]
+    print("乘积矩阵 (gt_rotation.T @ pred_rotation):")
+    print(mat2.numpy())
+    print(f"矩阵乘积的trace值: {trace2.item():.6f}")
     
-    return rre.item()
+    cos_theta2 = (trace2 - 1.0) * 0.5
+    cos_theta2 = torch.clamp(cos_theta2, -1.0, 1.0)
+    theta2 = torch.acos(cos_theta2)
+    rre2 = theta2 * 180.0 / math.pi
+    print(f"cos_theta值: {cos_theta2.item():.6f}")
+    print(f"得到的角度: {rre2.item():.6f}度")
+    
+    # 使用原始计算方式1的结果
+    print(f"\n最终使用方式1的结果: {rre1.item():.6f}度")
+    print("=============================================")
+    
+    return rre1.item()
 
 def relative_translation_error(gt_translation, pred_translation):
     """计算相对平移误差(RTE)，单位与输入相同"""
@@ -665,6 +720,17 @@ def apply_transformation(source_points, rotation, translation, normalization_inf
     返回:
         transformed_points: 变换后的点云，与输入格式相同
     """
+    # 打印输入值的信息
+    print(f"应用变换前源点云形状: {source_points.shape}")
+    print(f"旋转矩阵形状: {rotation.shape}, 值: \n{rotation}")
+    print(f"平移向量形状: {translation.shape}, 值: {translation}")
+    
+    if normalization_info:
+        print(f"归一化信息: {normalization_info}")
+        print(f"是否归一化: {normalization_info.get('is_normalized', False)}")
+        print(f"缩放因子: {normalization_info.get('scale_factor', None)}")
+        print(f"原始质心: {normalization_info.get('original_centroid', None)}")
+
     # 检查输入是否是张量
     if not isinstance(source_points, torch.Tensor):
         source_points = torch.tensor(source_points, dtype=torch.float32)

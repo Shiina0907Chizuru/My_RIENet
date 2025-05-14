@@ -367,6 +367,9 @@ def create_pkl_file(source_points, target_points, output_path, grid_info, rotati
     if rotation is None:
         rotation_tensor = torch.eye(3, dtype=torch.float32)
     else:
+        # 注意：在pkldataprocess.py中，rotation矩阵的语义是正确的
+        # 它表示从源点云到目标点云的变换，与cif_to_point_cloud.py中的语义一致
+        # 与test_rotation_translation.py不同，这里不需要进行转置操作
         rotation_tensor = torch.from_numpy(rotation).float()
     
     if translation is None:
@@ -414,8 +417,13 @@ def create_pkl_file(source_points, target_points, output_path, grid_info, rotati
         if target_points is not None:
             print(f"保存的目标点云形状: {target_points_tensor.shape}")
         print(f"保存的旋转矩阵: {'单位矩阵' if rotation is None else '随机旋转矩阵'}")
+        if rotation is not None:
+            print("该旋转矩阵表示从源点云到目标点云的变换，与cif_to_point_cloud.py中的语义一致")
         print(f"保存的平移向量: {'零向量' if translation is None else '随机平移向量'}")
+        if translation is not None:
+            print("该平移向量表示从源点云到目标点云的变换，与cif_to_point_cloud.py中的语义一致")
         print(f"保存的数据字典结构与字段: {', '.join(data_dict.keys())}")
+        print("注意：pkl文件中存储的旋转矩阵和平移向量与cif_to_point_cloud.py中的语义一致，即表示从源点云到目标点云的变换")
     
     return data_dict
 
